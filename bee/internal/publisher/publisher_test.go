@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestHungSSHAgentIsCancelled(t *testing.T) {

@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/registry"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/server"
+	"golang.org/x/crypto/ssh"
 )
 
 var version = "dev"

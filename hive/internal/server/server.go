@@ -18,9 +18,9 @@ import (
 	"time"
 	"unicode"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/herdr"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/registry"
+	"golang.org/x/crypto/ssh"
 )
 
 const maxControl = 64 << 10

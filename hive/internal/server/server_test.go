@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/registry"
+	"golang.org/x/crypto/ssh"
 )
 
 func key(t *testing.T) ssh.Signer {

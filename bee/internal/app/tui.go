@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.org/x/term"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/herdr"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/publisher"
+	"golang.org/x/term"
 )
 
 // TUI intentionally stays in normal terminal mode: native selection/copy and accessibility work.

@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
+	"github.com/deepshape-ai/herdr-hive/bee/internal/herdr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
-	"github.com/deepshape-ai/herdr-hive/bee/internal/herdr"
 )
 
 type Share struct {
