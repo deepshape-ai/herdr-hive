@@ -6,6 +6,9 @@ and switch sharing on or off. Its TUI and CLI call the same application logic.
 
 ## Install
 
+For download, checksum and first-run commands, start with the
+[Bee Quickstart](../README.md#2-install-bee-inside-herdr).
+
 Unpack the Bee release for your OS/architecture into a permanent directory and
 link that directory with Herdr:
 

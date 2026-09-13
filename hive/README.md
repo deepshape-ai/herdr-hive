@@ -6,6 +6,9 @@ native Herdr bootstrap and streaming. No database service is required.
 
 ## Start
 
+For download and checksum commands, start with the
+[Hive Quickstart](../README.md#1-install-hive-on-the-shared-machine).
+
 Collect one dedicated SSH **public** key per device into an authorized-keys file.
 Use plain public-key lines; authorized_keys options and SSH certificates are not
 part of v1. Never upload employee host login keys or private keys. Registered
