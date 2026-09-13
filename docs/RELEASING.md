@@ -32,14 +32,20 @@ SSH key or test-host secret is needed.
 The workflow requires the tag to exist and does not overwrite existing releases.
 Both products share GitHub's release list, so releases deliberately do not claim
 the repository-wide `latest` designation. Choose the desired component's tag.
-Generated GitHub release notes cover the repository; add product-specific notes
-before pushing a tag if a release needs a curated narrative.
+The workflow uses `docs/releases/COMPONENT-VERSION.md` when present; otherwise it
+generates repository-wide GitHub release notes. Add component-specific notes
+before pushing a tag.
 
 Failed checks or incomplete artifact sets prevent publication. A rerun can retry
 a failed build before publishing; replacing an already published artifact requires
-an explicit maintainer decision and is not automated. To roll back a deployment,
-install the previous component archive while retaining compatible configuration.
+an explicit maintainer decision and is not automated. Users upgrade with `bee update` or `hive update --state-dir PATH`.
 
 Workflows run when the corresponding GitHub events occur. Creating a workflow
 file alone does not push code or publish a release. macOS archives are not
 notarized; this pipeline does not use signing credentials.
+
+The updater lists releases by component tag and selects the highest stable semantic
+version; it does not use GitHub's repository-wide latest release. Drafts and
+prereleases are excluded. A release must include the exact archive names above
+and `SHA256SUMS`. These names are an installed-client compatibility contract.
+Keep the shared updater module in source checkouts when building either product.

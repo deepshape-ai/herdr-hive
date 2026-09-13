@@ -55,6 +55,7 @@ No remote repository or public release is created by these commands.
 - [Hive deployment and inspection](hive/README.md)
 - [Bee installation and use](bee/README.md)
 - [Architecture and compatibility](docs/DESIGN.md)
+- [One-command upgrades](docs/UPDATING.md)
 - [Verification evidence and limits](docs/EVIDENCE.md)
 - [Integration test instructions](tests/integration/README.md)
 - [GitHub Actions releases](docs/RELEASING.md)

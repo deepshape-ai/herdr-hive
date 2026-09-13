@@ -7,6 +7,7 @@ DynamicUser=yes
 StateDirectory=herdr-hive
 StateDirectoryMode=0700
 ExecStart=/usr/local/bin/hive --listen 0.0.0.0:2222 --state-dir /var/lib/herdr-hive --authorized-keys /etc/herdr-hive/authorized_keys
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 Environment=GOMEMLIMIT=160MiB GOMAXPROCS=2

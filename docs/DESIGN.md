@@ -120,3 +120,16 @@ distinguish Go heap/runtime allocation from OS RSS.
 - [Herdr remote client socket bridge](https://github.com/herdrdev/herdr/blob/v0.9.0/src/remote/host_unix.rs)
 - [Herdr plugin manifest](https://github.com/herdrdev/herdr/blob/v0.9.0/src/app/api/plugins/manifest.rs)
 - [Go SSH implementation](https://pkg.go.dev/golang.org/x/crypto/ssh)
+
+## Component updates
+
+Hive and Bee remain independently installed and released. A small standard-library
+Go module at `internal/update` shares only release discovery, verification and
+executable replacement. Neither product imports the other's application code.
+Source builds use the repository-local module replacement; packaged users need
+only their component executable. CI tests this module on both supported systems.
+
+[Updates](UPDATING.md) download while the current process continues serving, then
+replace its process image. SSH encryption state and goroutines are not migrated;
+connections briefly disconnect. This avoids a second relay generation, connection
+handoff protocol or supervisor service. No Herdr core changes are required.

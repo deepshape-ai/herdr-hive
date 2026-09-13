@@ -21,8 +21,10 @@ import (
 )
 
 type App struct {
-	Dir string
-	Out io.Writer
+	Version    string
+	Executable string
+	Dir        string
+	Out        io.Writer
 }
 
 func (a App) emit(v any) error { return json.NewEncoder(a.Out).Encode(v) }
@@ -50,13 +52,19 @@ bee sessions
 bee share SESSION
 bee unshare SESSION
 bee enable | disable | status | tui
+bee update
 bee run | restore
 All noninteractive command results are JSON. Sharing grants full access to the selected named session to registered Hive members.`)
 		return nil
+	case "update":
+		if len(args) != 1 {
+			return errors.New("usage: bee update")
+		}
+		return a.update(ctx)
 	case "tui":
 		return a.TUI(ctx)
 	case "run":
-		return publisher.Daemon(ctx, a.Dir)
+		return publisher.Daemon(ctx, a.Dir, a.Version, a.Executable)
 	case "restore":
 		c, e := config.Load(a.Dir)
 		if e != nil {
@@ -247,7 +255,7 @@ func (a App) spawnIfUnowned() (bool, error) {
 		return false, e
 	}
 	lock.Close()
-	executable, e := os.Executable()
+	executable, e := a.executable()
 	if e != nil {
 		return false, e
 	}
@@ -259,4 +267,11 @@ func (a App) spawnIfUnowned() (bool, error) {
 	}
 	cmd.Process.Release()
 	return true, nil
+}
+
+func (a App) executable() (string, error) {
+	if a.Executable != "" {
+		return a.Executable, nil
+	}
+	return os.Executable()
 }

@@ -27,10 +27,13 @@ type Share struct {
 	Name  string `json:"name,omitempty"`
 }
 type Status struct {
-	Enabled   bool    `json:"enabled"`
-	Connected bool    `json:"connected"`
-	Shares    []Share `json:"shares"`
-	Error     string  `json:"error,omitempty"`
+	Version    string  `json:"version,omitempty"`
+	Executable string  `json:"executable,omitempty"`
+	PID        int     `json:"pid,omitempty"`
+	Enabled    bool    `json:"enabled"`
+	Connected  bool    `json:"connected"`
+	Shares     []Share `json:"shares"`
+	Error      string  `json:"error,omitempty"`
 }
 type State struct {
 	mu    sync.Mutex

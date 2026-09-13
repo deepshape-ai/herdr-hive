@@ -23,6 +23,11 @@ id = "disable"
 title = "Bee: disable sharing"
 command = ["./bee", "disable"]
 
+[[actions]]
+id = "update"
+title = "Bee: update to latest stable release"
+command = ["./bee", "update"]
+
 [[panes]]
 id = "settings"
 title = "Bee"

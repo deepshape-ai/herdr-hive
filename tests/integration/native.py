@@ -55,6 +55,10 @@ def api(path, method, params=None):
 
 def main():
     R.mkdir(mode=0o700)
+    install=R/'install';install.mkdir()
+    for component in ('hive','bee'):
+        run(['go','-C',ROOT/component,'build','-ldflags','-X main.version=0.0.1',
+             '-o',install/component,'./cmd/'+component],timeout=90)
     for who in ['hive', 'a', 'b', 'c', 'consumer']:
         (R / who).mkdir(mode=0o700)
     for who in ['a', 'b', 'c', 'consumer']:
@@ -63,7 +67,7 @@ def main():
     keys.write_text(''.join((R / w / 'key.pub').read_text() for w in ['a', 'b', 'c', 'consumer']))
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
-    hive = spawn([ROOT / 'dist/hive', '--state-dir', R/'hive', '--authorized-keys', keys,
+    hive = spawn([install / 'hive', '--state-dir', R/'hive', '--authorized-keys', keys,
                   '--listen', f'127.0.0.1:{port}'], 'hive')
     wait(lambda: (R/'hive/host_key').exists())
     pub = run(['ssh-keygen', '-y', '-f', R/'hive/host_key']).stdout.strip()
@@ -83,7 +87,7 @@ def main():
         run([bee,'share','default'],env)
         # Run the exact publisher daemon in the foreground so cleanup owns every PID.
         cpath=R/who/'bee/config.json'; cfg=json.loads(cpath.read_text());cfg['enabled']=True;cpath.write_text(json.dumps(cfg))
-        spawn([bee,'run'],who+'-bee',env)
+        spawn([install/'bee','run'],who+'-bee',env)
         def connected():
             p=run([bee,'status'],env); return json.loads(p.stdout).get('connected')
         wait(connected)
@@ -128,6 +132,42 @@ def main():
     tui.expect('Configure Hive');tui.sendline('2');tui.expect('Visible name:');tui.sendline('Updated worker');tui.expect('Updated worker');tui.sendline('q');tui.expect(pexpect.EOF)
     assert json.loads(run([ROOT/'dist/bee','name'],envs['a']).stdout)['name']=='Updated worker'
     result['plugin_actions_and_tui_cli_parity']=True
+    # Online process replacement keeps configuration, identities and local sessions.
+    before=json.loads(run([ROOT/'dist/hive','inspect','--state-dir',R/'hive','--json']).stdout)
+    assert before['version']=='0.0.1'
+    expected=run([ROOT/'dist/hive','version']).stdout.strip()
+    for component in ('hive','bee'):
+        shutil.copy2(ROOT/'dist'/component,install/(component+'.new'))
+        os.replace(install/(component+'.new'),install/component)
+    with socket.socket(socket.AF_UNIX) as control:
+        control.settimeout(5);control.connect(str(R/'hive/control.sock'))
+        control.sendall(b'"restart"\n');assert json.loads(control.recv(128)) is True
+    def hive_restarted():
+        p=run([ROOT/'dist/hive','inspect','--state-dir',R/'hive','--json'],check=False)
+        return p.returncode==0 and json.loads(p.stdout)['version']==expected and json.loads(p.stdout)['pid']==before['pid']
+    wait(hive_restarted)
+    assert hive.poll() is None
+    for who in 'abc':
+        def reconnected():
+            state=json.loads(run([ROOT/'dist/bee','status'],envs[who]).stdout)
+            return state.get('connected') and state['shares'][0]['id']==shares[who]['id']
+        wait(reconnected,20)
+    before_bee=json.loads(run([ROOT/'dist/bee','status'],envs['c']).stdout)
+    assert before_bee['version']=='0.0.1'
+    with socket.socket(socket.AF_UNIX) as control:
+        control.settimeout(10);control.connect(str(R/'c/bee/control.sock'))
+        control.sendall(b'"restart"\n');control.recv(65536)
+    def bee_restarted():
+        state=json.loads(run([ROOT/'dist/bee','status'],envs['c']).stdout)
+        return state.get('connected') and state.get('version')==expected and state.get('pid')==before_bee['pid'] and state['shares'][0]['id']==shares['c']['id']
+    wait(bee_restarted,20)
+    assert api(R/'a/herdr/herdr.sock','session.snapshot')
+    p=pexpect.spawn(BIN,['--remote','shared-c'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(30,120));terminals.append(p)
+    p.expect('HOST_c');time.sleep(.4)
+    p.send("printf '\\125\\120\\107\\122\\101\\104\\105_OK\\n'\r")
+    p.expect('UPGRADE_OK')
+    result['hive_and_bee_reexec_preserve_local_sessions_and_share_ids']=True
+    result['native_terminal_after_executable_upgrade']=True
     # Disable tears down an already-open native connection; local session stays alive.
     run([ROOT/'dist/bee','disable'],envs['b'])
     assert api(R/'b/herdr/herdr.sock','session.snapshot')

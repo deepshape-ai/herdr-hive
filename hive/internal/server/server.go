@@ -49,18 +49,19 @@ type binding struct {
 	down   atomic.Uint64
 }
 type Server struct {
-	Registry         *registry.Registry
-	AuthorizedKeys   string
-	mu               sync.Mutex
-	shares           map[string]*binding
-	owners           map[string]*ssh.ServerConn
-	conns            map[net.Conn]bool
-	sem              chan struct{}
-	wg               sync.WaitGroup
-	channels         chan struct{}
-	started          time.Time
-	rejected         atomic.Uint64
-	operationTimeout time.Duration
+	Version, Executable string
+	Registry            *registry.Registry
+	AuthorizedKeys      string
+	mu                  sync.Mutex
+	shares              map[string]*binding
+	owners              map[string]*ssh.ServerConn
+	conns               map[net.Conn]bool
+	sem                 chan struct{}
+	wg                  sync.WaitGroup
+	channels            chan struct{}
+	started             time.Time
+	rejected            atomic.Uint64
+	operationTimeout    time.Duration
 }
 
 func New(r *registry.Registry, keys string) *Server {

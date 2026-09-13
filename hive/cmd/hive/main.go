@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -22,9 +24,25 @@ import (
 )
 
 var version = "dev"
+var executable string
+var errRestart = errors.New("restart Hive process")
 
 func main() {
-	if e := run(); e != nil {
+	var e error
+	executable, e = os.Executable()
+	if e == nil {
+		executable, e = filepath.EvalSymlinks(executable)
+	}
+	if e == nil {
+		e = run()
+	}
+	if errors.Is(e, flag.ErrHelp) {
+		return
+	}
+	if errors.Is(e, errRestart) {
+		e = syscall.Exec(executable, os.Args, os.Environ())
+	}
+	if e != nil {
 		slog.Error(e.Error())
 		os.Exit(1)
 	}
@@ -33,6 +51,9 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println(version)
 		return nil
+	}
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		return upgrade(os.Args[2:])
 	}
 	if len(os.Args) > 1 && os.Args[1] == "inspect" {
 		return inspect(os.Args[2:])
@@ -113,18 +134,49 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(signals)
+	var restart atomic.Bool
+	go func() {
+		select {
+		case sig := <-signals:
+			restart.Store(sig == syscall.SIGHUP)
+			stop()
+		case <-ctx.Done():
+		}
+	}()
 	slog.Info("Hive listening", "address", l.Addr(), "host_key", ssh.FingerprintSHA256(signer.PublicKey()), "version", version)
 	gateway := server.New(r, *keys)
+	gateway.Version = version
+	gateway.Executable = executable
+	inspectionDone := make(chan struct{})
 	gateway.Limits(*maxConnections, *maxChannels)
 	go func() {
+		defer close(inspectionDone)
 		if e := gateway.Inspect(ctx, filepath.Join(*state, "inspect.sock")); e != nil {
 			slog.Error("inspection endpoint failed", "error", e)
 			stop()
 		}
 	}()
-	return gateway.Serve(ctx, l, signer)
+	controlDone := make(chan struct{})
+	go func() {
+		defer close(controlDone)
+		if err := server.Control(ctx, filepath.Join(*state, "control.sock"), func() { restart.Store(true); stop() }); err != nil {
+			slog.Error("control endpoint failed", "error", err)
+			stop()
+		}
+	}()
+	e = gateway.Serve(ctx, l, signer)
+	stop()
+	<-inspectionDone
+	<-controlDone
+	if e == nil && restart.Load() {
+		return errRestart
+	}
+	return e
 }
 
 func inspect(args []string) error {

@@ -1,7 +1,7 @@
 # Verification evidence
 
 2026-09-13. Product implementation tests, not the earlier stock-sshd relay experiment.
-No production deployment or public release has been performed. Real test-host
+No production deployment has been performed. Real test-host
 addresses, credentials and terminal recordings are excluded from this repository.
 
 ## Passed
@@ -28,6 +28,19 @@ addresses, credentials and terminal recordings are excluded from this repository
   heap growth remains below the 32 MiB test guard (including both test clients and
   server). The global channel budget rejects excess channels. Closing publication
   releases blocked copy operations and capacity. This runs under the race detector.
+
+## Upgrade verification
+
+- Archive integrity, unsafe paths and symlinks, per-installation locking, cancelled
+  downloads, stable component selection, prerelease downgrade prevention and
+  bounded binary version output have automated coverage.
+- A native integration run starts test binaries reporting 0.0.1, replaces them
+  with the current build, requests both process restarts and confirms their new
+  runtime versions with unchanged PIDs and share IDs. Native terminal input/output
+  works after reconnect and local Herdr sessions survive. Test processes and
+  temporary installations are removed.
+- Restart is requested through private local IPC. A privileged Hive updater never
+  signals a PID supplied by the service. Unexpected control operations are rejected.
 
 ## Measurements
 

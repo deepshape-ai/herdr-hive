@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -44,7 +43,7 @@ func (a App) TUI(ctx context.Context) error {
 		for _, share := range s.Shares {
 			fmt.Fprintf(a.Out, "  %s / %s → %s\n", share.Name, share.Label, share.ID)
 		}
-		fmt.Fprintln(a.Out, "\n1  Configure Hive\n2  Change visible name\n3  Select shared sessions\n4  Toggle all sharing\nr  Refresh\nq  Close (sharing continues)")
+		fmt.Fprintln(a.Out, "\n1  Configure Hive\n2  Change visible name\n3  Select shared sessions\n4  Toggle all sharing\nu  Update Bee (briefly reconnects sharing)\nr  Refresh\nq  Close (sharing continues)")
 		if message != "" {
 			fmt.Fprintln(a.Out, "\n"+message)
 			message = ""
@@ -57,6 +56,8 @@ func (a App) TUI(ctx context.Context) error {
 		switch choice {
 		case "q":
 			return nil
+		case "u":
+			args = []string{"update"}
 		case "r":
 			continue
 		case "1":
@@ -121,9 +122,12 @@ func (a App) TUI(ctx context.Context) error {
 		default:
 			continue
 		}
-		if e = (App{Dir: a.Dir, Out: io.Discard}).Execute(ctx, args); e != nil {
+		if e = (App{Dir: a.Dir, Out: a.Out, Version: a.Version, Executable: a.Executable}).Execute(ctx, args); e != nil {
 			message = e.Error()
 		} else {
+			if choice == "u" {
+				return publisher.ErrRestart
+			}
 			message = "Saved."
 		}
 	}

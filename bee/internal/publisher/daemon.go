@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,10 +27,13 @@ func Control(dir, op string) (Status, error) {
 		return Status{}, e
 	}
 	var s Status
-	e = json.NewDecoder(c).Decode(&s)
+	e = json.NewDecoder(io.LimitReader(c, 128<<10)).Decode(&s)
 	return s, e
 }
-func Daemon(ctx context.Context, dir string) error {
+
+var ErrRestart = errors.New("restart Bee process")
+
+func Daemon(ctx context.Context, dir, version, executable string) error {
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
@@ -104,14 +108,21 @@ func Daemon(ctx context.Context, dir string) error {
 		}
 		conn.SetDeadline(time.Now().Add(10 * time.Second))
 		var op string
-		e = json.NewDecoder(conn).Decode(&op)
+		e = json.NewDecoder(io.LimitReader(conn, 128)).Decode(&op)
 		if e == nil {
 			if op == "reload" {
 				reload()
 			}
-			json.NewEncoder(conn).Encode(state.Get())
+			status := state.Get()
+			status.Version = version
+			status.Executable = executable
+			status.PID = os.Getpid()
+			json.NewEncoder(conn).Encode(status)
 		}
 		conn.Close()
+		if e == nil && op == "restart" {
+			return ErrRestart
+		}
 		if e == nil && op == "reload" && !state.Get().Enabled {
 			return nil
 		}

@@ -8,3 +8,7 @@ require (
 )
 
 require golang.org/x/sys v0.48.0 // indirect
+
+require github.com/deepshape-ai/herdr-hive/internal/update v0.0.0
+
+replace github.com/deepshape-ai/herdr-hive/internal/update => ../internal/update

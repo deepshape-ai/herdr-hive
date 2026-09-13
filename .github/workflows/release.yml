@@ -19,7 +19,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          if [[ ! "$TAG" =~ ^(hive|bee)/v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+          if [[ ! "$TAG" =~ ^(hive|bee)/v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?)$ ]]; then
             echo 'Expected hive/vX.Y.Z or bee/vX.Y.Z, optionally with a prerelease suffix' >&2
             exit 1
           fi
@@ -66,6 +66,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: release-${{ needs.metadata.outputs.component }}-*
@@ -102,6 +105,9 @@ jobs:
         run: |
           flags=()
           if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
+          notes=(--generate-notes)
+          notes_file="$GITHUB_WORKSPACE/docs/releases/$COMPONENT-$VERSION.md"
+          if [[ -f "$notes_file" ]]; then notes=(--notes-file "$notes_file"); fi
           gh release create "$TAG" ./*.tar.gz SHA256SUMS \
             --verify-tag --title "$COMPONENT v$VERSION" \
-            --generate-notes --latest=false "${flags[@]}"
+            --latest=false "${notes[@]}" "${flags[@]}"

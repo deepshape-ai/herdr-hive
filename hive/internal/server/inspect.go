@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -25,6 +26,9 @@ type Detail struct {
 	ToConsumer  uint64 `json:"bytes_to_consumer"`
 }
 type Snapshot struct {
+	PID            int      `json:"pid"`
+	Version        string   `json:"version"`
+	Executable     string   `json:"executable"`
 	RegistryBytes  int64    `json:"registry_bytes"`
 	UptimeSeconds  int64    `json:"uptime_seconds"`
 	Connections    int      `json:"connections"`
@@ -73,7 +77,46 @@ func (s *Server) Inspect(ctx context.Context, path string) error {
 			return e
 		}
 		c.SetDeadline(time.Now().Add(2 * time.Second))
-		json.NewEncoder(c).Encode(s.Snapshot())
+		snapshot := s.Snapshot()
+		snapshot.PID = os.Getpid()
+		snapshot.Version = s.Version
+		snapshot.Executable = s.Executable
+		json.NewEncoder(c).Encode(snapshot)
 		c.Close()
+	}
+}
+
+// Control requests restart inside the service process. Privileged clients never
+// signal a PID supplied by the less-privileged service.
+func Control(ctx context.Context, path string, restart func()) error {
+	os.Remove(path)
+	l, e := net.Listen("unix", path)
+	if e != nil {
+		return e
+	}
+	defer l.Close()
+	defer os.Remove(path)
+	if e = os.Chmod(path, 0600); e != nil {
+		return e
+	}
+	go func() { <-ctx.Done(); l.Close() }()
+	for {
+		c, e := l.Accept()
+		if e != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return e
+		}
+		c.SetDeadline(time.Now().Add(2 * time.Second))
+		var op string
+		e = json.NewDecoder(io.LimitReader(c, 128)).Decode(&op)
+		ok := e == nil && op == "restart"
+		json.NewEncoder(c).Encode(ok)
+		c.Close()
+		if ok {
+			restart()
+			return nil
+		}
 	}
 }

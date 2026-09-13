@@ -105,14 +105,29 @@ Go's soft memory target to 160 MiB. These protect the host, but overload or an O
 kill interrupts remote sessions. Local agents survive. Tune limits after measuring
 your workload; no unmeasured concurrency or latency guarantee is implied.
 
-## Upgrade, removal and recovery
+## Update and removal
 
-Stop Hive, replace the binary and restart using the same state directory. Bees
-reconnect automatically; native consumers reconnect according to Herdr behavior.
-An offline target never starts a Herdr server on Hive. Old terminal input is not
-replayed. One process owns the state directory through a file lock.
+```sh
+# Use the same executable path as the service. For the supplied systemd unit:
+sudo /usr/local/bin/hive update --state-dir /var/lib/herdr-hive
+# A user-owned foreground installation uses its own --state-dir, without sudo.
+```
 
-Restore the previous binary and state backup to roll back. Removing the service
-and its directory removes Hive only; it does not stop employee agents. Removing
-an authorized key blocks new authentication. Restart Hive if existing transports
-for that key must be terminated immediately.
+Hive downloads and verifies its newest stable release while serving existing
+connections, then replaces the executable and requests an in-process restart.
+The command confirms that the inspection endpoint reports the new version.
+The service retains its PID, arguments, host key, registered names and state
+location. Bees reconnect automatically; consumers reconnect according to Herdr
+behavior. Active remote connections briefly disconnect during the switch. Local
+agents keep running and old input is never replayed. The daemon does not need
+write access to its binary: the administrator's update command performs installation.
+
+For an offline installation, `hive update` updates only the binary and reports
+`active: false`. Omitting `--state-dir` never guesses which running service to
+restart. `SIGHUP` (or `systemctl reload hive` when installed as `hive.service`)
+re-executes the installed binary with the same arguments. See
+[upgrade behavior](../docs/UPDATING.md) for bounded downloads and failure handling.
+
+Removing the service and its directory removes Hive only; it does not stop
+employee agents. Removing an authorized key blocks new authentication. Restart
+Hive if existing transports for that key must be terminated immediately.
