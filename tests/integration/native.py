@@ -128,8 +128,13 @@ def main():
     wait(lambda: not json.loads(run([ROOT/'dist/bee','status'],envs['a']).stdout)['enabled'])
     run([BIN,'plugin','action','invoke','enable','--plugin','herdr.bee'],envs['a'])
     wait(lambda: json.loads(run([ROOT/'dist/bee','status'],envs['a']).stdout)['connected'])
-    tui=pexpect.spawn(str(ROOT/'dist/bee'),['tui'],env=envs['a'],encoding='utf-8',timeout=10,dimensions=(30,120));terminals.append(tui)
-    tui.expect('Configure Hive');tui.sendline('2');tui.expect('Visible name:');tui.sendline('Updated worker');tui.expect('Updated worker');tui.sendline('q');tui.expect(pexpect.EOF)
+    tui=pexpect.spawn(str(ROOT/'dist/bee'),['tui'],env=dict(envs['a'],TERM='xterm-256color'),encoding='utf-8',timeout=10,dimensions=(30,120));terminals.append(tui)
+    tui.expect('Worker')
+    # Connection starts on Hive; Tab selects the name and Enter starts editing.
+    tui.send('\t\r')
+    tui.sendcontrol('a');tui.sendcontrol('k');tui.send('Updated worker')
+    tui.sendcontrol('s');tui.expect_exact('Changes saved.')
+    tui.send('q');tui.expect(pexpect.EOF)
     assert json.loads(run([ROOT/'dist/bee','name'],envs['a']).stdout)['name']=='Updated worker'
     result['plugin_actions_and_tui_cli_parity']=True
     # Online process replacement keeps configuration, identities and local sessions.
