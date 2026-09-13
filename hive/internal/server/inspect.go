@@ -26,23 +26,25 @@ type Detail struct {
 	ToConsumer  uint64 `json:"bytes_to_consumer"`
 }
 type Snapshot struct {
-	EnrollEnabled  bool     `json:"enroll_enabled"`
-	Enrolled       uint64   `json:"enrolled"`
-	EnrollRejected uint64   `json:"enroll_rejected"`
-	PID            int      `json:"pid"`
-	Version        string   `json:"version"`
-	Executable     string   `json:"executable"`
-	RegistryBytes  int64    `json:"registry_bytes"`
-	UptimeSeconds  int64    `json:"uptime_seconds"`
-	Connections    int      `json:"connections"`
-	Channels       int      `json:"channels"`
-	MaxConnections int      `json:"max_connections"`
-	MaxChannels    int      `json:"max_channels"`
-	Rejected       uint64   `json:"rejected"`
-	HeapBytes      uint64   `json:"heap_bytes"`
-	RuntimeBytes   uint64   `json:"runtime_bytes"`
-	Goroutines     int      `json:"goroutines"`
-	Shares         []Detail `json:"shares"`
+	GatewayViewers    int      `json:"gateway_viewers"`
+	MaxGatewayViewers int      `json:"max_gateway_viewers"`
+	EnrollEnabled     bool     `json:"enroll_enabled"`
+	Enrolled          uint64   `json:"enrolled"`
+	EnrollRejected    uint64   `json:"enroll_rejected"`
+	PID               int      `json:"pid"`
+	Version           string   `json:"version"`
+	Executable        string   `json:"executable"`
+	RegistryBytes     int64    `json:"registry_bytes"`
+	UptimeSeconds     int64    `json:"uptime_seconds"`
+	Connections       int      `json:"connections"`
+	Channels          int      `json:"channels"`
+	MaxConnections    int      `json:"max_connections"`
+	MaxChannels       int      `json:"max_channels"`
+	Rejected          uint64   `json:"rejected"`
+	HeapBytes         uint64   `json:"heap_bytes"`
+	RuntimeBytes      uint64   `json:"runtime_bytes"`
+	Goroutines        int      `json:"goroutines"`
+	Shares            []Detail `json:"shares"`
 }
 
 func (s *Server) Snapshot() Snapshot {
@@ -50,7 +52,7 @@ func (s *Server) Snapshot() Snapshot {
 	runtime.ReadMemStats(&mem)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v := Snapshot{EnrollEnabled: s.AuthorizedTokens != "", Enrolled: s.enrolled.Load(), EnrollRejected: s.enrollRejected.Load(), RegistryBytes: s.Registry.DiskBytes(), UptimeSeconds: int64(time.Since(s.started).Seconds()), Connections: len(s.conns), Channels: len(s.channels), MaxConnections: cap(s.sem), MaxChannels: cap(s.channels), Rejected: s.rejected.Load(), HeapBytes: mem.HeapAlloc, RuntimeBytes: mem.Sys, Goroutines: runtime.NumGoroutine(), Shares: []Detail{}}
+	v := Snapshot{GatewayViewers: len(s.gatewaySlots), MaxGatewayViewers: cap(s.gatewaySlots), EnrollEnabled: s.AuthorizedTokens != "", Enrolled: s.enrolled.Load(), EnrollRejected: s.enrollRejected.Load(), RegistryBytes: s.Registry.DiskBytes(), UptimeSeconds: int64(time.Since(s.started).Seconds()), Connections: len(s.conns), Channels: len(s.channels), MaxConnections: cap(s.sem), MaxChannels: cap(s.channels), Rejected: s.rejected.Load(), HeapBytes: mem.HeapAlloc, RuntimeBytes: mem.Sys, Goroutines: runtime.NumGoroutine(), Shares: []Detail{}}
 	for _, b := range s.shares {
 		v.Shares = append(v.Shares, Detail{b.share.ID, b.share.Name, b.share.Label, len(b.active), b.up.Load(), b.down.Load()})
 	}

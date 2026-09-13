@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import pexpect
+sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
 R = ROOT / '.r'
@@ -128,10 +129,26 @@ def main():
     # Isolate native OpenSSH config without modifying ~/.ssh/config or Herdr itself.
     sshconfig=R/'ssh_config'
     sshconfig.write_text(''.join(f'Host shared-{w}\n HostName 127.0.0.1\n Port {port}\n User {s["id"]}\n IdentityFile {R}/consumer/key\n UserKnownHostsFile {known}\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n BatchMode yes\n ControlMaster no\n' for w,s in shares.items()))
+    with sshconfig.open('a') as f:f.write(f'Host hive\n HostName 127.0.0.1\n Port {port}\n User hive\n IdentityFile {R}/consumer/key\n UserKnownHostsFile {known}\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n BatchMode yes\n ControlMaster no\n')
     bindir=R/'bin';bindir.mkdir();wrapper=bindir/'ssh'
     wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];out=[]\nwhile a:\n x=a.pop(0)\n if x in ("-F","-S"): a.pop(0)\n else: out.append(x)\nos.execv("/usr/bin/ssh",["ssh","-F",'+repr(str(sshconfig))+']+out)\n');wrapper.chmod(0o700)
     consumer_env=dict(BASE,XDG_CONFIG_HOME=str(R/'consumer'),XDG_STATE_HOME=str(R/'consumer/state'),PATH=str(bindir)+os.pathsep+BASE['PATH'],TERM='xterm-256color')
     conf=R/'consumer/herdr';conf.mkdir();(conf/'config.toml').write_text('onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n')
+    from gateway import verify, verify_visibility
+    verify(sshbase,shares,api,{who:R/who/'herdr/herdr.sock' for who in 'abc'},
+           lambda who,enabled:run([ROOT/'dist/bee','enable' if enabled else 'disable'],envs[who]))
+    own=list(sshbase);own[own.index('-i')+1]=str(R/'a/key')
+    verify_visibility(own,2,'HOST_a')
+    result['gateway_prefix_ids_focus_input_self_hiding_and_reconnect']=True
+    added=run([BIN,'machine','add','hive','--label','Hive'],consumer_env,check=False,timeout=45)
+    assert added.returncode==0,added.stderr
+    p=pexpect.spawn(BIN,['--remote','hive'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(40,150))
+    terminals.append(p);p.expect('HOST_');time.sleep(1)
+    p.send("printf '\\110\\111\\126\\105_GATEWAY_OK\\n'\r");p.expect('HIVE_GATEWAY_OK');p.close(force=True)
+    # Subsequent direct-sharing tests run without an additional saved gateway.
+    entry=next(x for x in json.loads(run([BIN,'machine','list','--json'],consumer_env).stdout) if x['label']=='Hive')
+    run([BIN,'machine','remove',entry['id']],consumer_env)
+    result['native_gateway_machine_add_and_terminal']=True
     added=run([BIN,'machine','add','shared-b','--label','Worker B'],consumer_env,check=False,timeout=45)
     result['machine_add']={'code':added.returncode,'stdout':added.stdout,'stderr':added.stderr}
     if added.returncode:raise RuntimeError(added.stderr)

@@ -107,39 +107,42 @@ or Hive restarts; no history database or terminal preview is maintained.
 
 ## Native consumer setup
 
-Use the same dedicated device key for publishing and consuming:
-
-```sh
-ssh -p 2222 -i ~/.ssh/hive_device hive@hive.example.internal 'list --json'
-```
-
-The list contains other online devices' shares. Copy a returned `id` into a normal
-SSH alias (example ID below is illustrative):
+Use the same dedicated device key for publishing and consuming. Configure one
+SSH alias using the `hive` application user:
 
 ```sshconfig
-Host hive-colleague
+Host hive
     HostName hive.example.internal
     Port 2222
-    User s-0123456789abcdef01234567
+    User hive
     IdentityFile ~/.ssh/hive_device
+    UserKnownHostsFile ~/.ssh/hive_known_hosts
     IdentitiesOnly yes
     StrictHostKeyChecking yes
 ```
 
-Then use Herdr itself:
-
 ```sh
-herdr machine add hive-colleague --label "Colleague / project"
+herdr machine add hive --label Hive
 ```
 
-The label shown in Herdr is the colleague's name, not Hive. One alias/profile
-represents one shared named session. The alias already selects the published
-session: **omit `--remote-session`**. Hive rejects attempts to retarget the alias.
+Unmodified Herdr 0.9.0 automatically shows other devices' online shared sessions
+under this one machine. Workspace labels are `[Bee name] session / workspace`,
+for example `[Alice] research / xxx`. Hive refreshes membership every second;
+new publications appear and offline publications disappear. Names and IDs are
+projected by Hive; the owner's actual workspace names are unchanged. Sharing and
+consuming with the same key hides your own publications.
 
-Own shares are hidden by device key, not by source IP or hostname. Using a different
-key on the same machine represents a different device. Existing locally saved
-machine profiles are not silently edited; remove obsolete profiles with Herdr's
-native `machine remove`.
+The gateway routes focus, semantic input, clipboard images, pane/tab/workspace
+creation and management, selection/copy, scroll and split geometry to the owning
+session. Moving objects between different shared sessions, global workspace
+reordering, worktree operations and remote installation/configuration operations
+are not offered by the aggregate endpoint. Operations involving IDs from multiple
+sessions are rejected. Shared sessions retain native Herdr concurrency semantics.
+
+For a transparent connection to one session, `ssh hive 'list --json'` still returns
+the directory. Create another alias with `User s-…` from that response and run
+`herdr machine add <alias>`. This direct path preserves the full upstream native
+protocol. Omit `--remote-session` in both modes.
 
 ## Resource envelope
 
@@ -197,3 +200,19 @@ re-executes the installed binary with the same arguments. See
 Removing the service and its directory removes Hive only; it does not stop
 employee agents. Removing an authorized key blocks new authentication. Restart
 Hive if existing transports for that key must be terminated immediately.
+
+### Aggregate gateway limits
+
+The aggregate endpoint accepts two concurrent viewers, each opening at most eight
+visible sessions in stable share-ID order. If more sessions are published, a
+configuration notice explains the limit; the direct sharing-ID path remains
+available. These limits are independent of the existing SSH/channel budgets.
+`hive inspect --json` includes `gateway_viewers` and `max_gateway_viewers`.
+
+Each upstream snapshot is at most 256 KiB. Native frames, retained complete
+surfaces (including live image assets), and incomplete response data per source
+are each capped at 2 MiB; surfaces contain at most 65,536 cells. There are at most
+64 pending operations per viewer, expiring after 30 seconds. Frame queues are
+bounded, and SSH application writes have a 10-second hard limit. A failed source
+is removed and retried without replaying input. Only the current complete screen
+is retained in memory; no transcript or terminal data is written to disk.

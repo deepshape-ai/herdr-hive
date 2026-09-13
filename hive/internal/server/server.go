@@ -55,6 +55,7 @@ type Server struct {
 	AuthorizedTokens, EnrollmentState, RegisteredKeys string
 	enrollMu                                          sync.Mutex
 	enrollSlots                                       chan struct{}
+	gatewaySlots                                      chan struct{}
 	enrolled, enrollRejected                          atomic.Uint64
 	mu                                                sync.Mutex
 	shares                                            map[string]*binding
@@ -69,7 +70,7 @@ type Server struct {
 }
 
 func New(r *registry.Registry, keys string) *Server {
-	return &Server{enrollSlots: make(chan struct{}, 4), Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
+	return &Server{gatewaySlots: make(chan struct{}, 2), enrollSlots: make(chan struct{}, 4), Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
 }
 func (s *Server) auth(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	if _, certificate := key.(*ssh.Certificate); certificate {
@@ -321,7 +322,7 @@ func (s *Server) session(c *ssh.ServerConn, n ssh.NewChannel) {
 func (s *Server) execute(c *ssh.ServerConn, ch ssh.Channel, command string, clientDone <-chan struct{}, lifetime *time.Timer) error {
 	if c.User() == "hive" {
 		if command != "list --json" {
-			return errors.New("supported command: list --json")
+			return s.aggregate(c, ch, command, clientDone, lifetime)
 		}
 		visible := []Share{}
 		owner := c.Permissions.Extensions["owner"]

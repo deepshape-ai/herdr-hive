@@ -110,15 +110,17 @@ same controls for scripts and agents, using its full plugin-directory path.
 ### 3. Connect from another host
 
 Consumers need no Bee installation. Register their dedicated device public key
-with Hive, then follow [native consumer setup](hive/README.md#native-consumer-setup)
-to query shares and create an SSH alias for the selected share:
+with Hive, then configure an SSH alias named `hive` with `User hive`, following
+[native consumer setup](hive/README.md#native-consumer-setup):
 
 ```sh
-herdr machine add hive-colleague --label "Colleague / project"
+herdr machine add hive --label Hive
 ```
 
-The profile points to the selected shared session. Omit `--remote-session` and
-use the same device key for publishing and consuming to exclude your own shares.
+One machine automatically shows other devices' shared workspaces as
+`[Bee name] session / workspace`. No Herdr changes are needed. Use the same device
+key for publishing and consuming to exclude your own shares. The optional
+sharing-ID aliases still provide a direct connection to one published session.
 
 ### 4. Update Hive and Bee
 

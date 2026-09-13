@@ -55,3 +55,14 @@ must protect token-file writes and back up usage state with registered keys;
 rolling back or deleting usage state can restore spent capacity. Stop Hive before editing its service-owned `registered_keys`, then start it
 again; this avoids racing new enrollments and terminates existing connections.
 Revoke the token too to prevent re-enrollment.
+
+### Aggregate gateway
+
+The `hive` native endpoint combines only publications visible to the authenticated
+device. Resource IDs include the source share and server boot identity; display
+prefixes are cosmetic and never an authorization credential. Operations spanning
+sources are rejected. RPC replies are accepted only from the source assigned to
+an outstanding request. The gateway decodes bounded generation-1 frames, retains
+only bounded current surfaces/image assets in memory, and imposes hard application
+write deadlines. It never interprets terminal text as routing data or executes
+bootstrap shell text. Direct sharing-ID connections keep transparent forwarding.

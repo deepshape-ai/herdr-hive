@@ -78,13 +78,13 @@ Bee 会打开独立的分栏 pane。同一操作会聚焦当前 tab 已有的面
 
 ### 3. 从另一台主机访问
 
-访问端无需安装 Bee。向 Hive 注册专用设备公钥后，按[原生访问端配置](hive/README.md#native-consumer-setup)查询共享并为选定会话创建 SSH 别名，然后运行：
+访问端无需安装 Bee。向 Hive 注册专用设备公钥后，按[原生访问端配置](hive/README.md#native-consumer-setup)创建 `User hive` 的 SSH 别名：
 
 ```sh
-herdr machine add hive-colleague --label "Colleague / project"
+herdr machine add hive --label Hive
 ```
 
-该配置指向选定的共享会话，无需添加 `--remote-session`。分享和访问使用同一设备密钥，才能排除自己发布的会话。
+一个 machine 自动展示其他设备的共享工作区，名称为 `[Bee name] session / workspace`，例如 `[Alice] research / xxx`。无需修改 Herdr。分享和访问使用同一设备密钥，会自动隐藏自己发布的会话。仍可用共享 ID 建立只连接某个会话的别名。
 
 ### 4. 更新 Hive 和 Bee
 

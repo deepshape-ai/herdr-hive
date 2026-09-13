@@ -41,7 +41,7 @@ system permissions or subdivide a selected session's workspaces. A session may
 continue to change or restart under the same selected name. Fine ACLs, read-only
 roles and control leases are intentionally absent from this product scope.
 
-Hive hides a device's own publications from `list --json` and rejects self-routing.
+Hive hides a device's own publications from the directory and aggregate endpoint, and rejects self-routing.
 Native Herdr's locally saved profiles are owned by Herdr and are not edited by Bee.
 Different keys represent different devices even when they share an IP or hostname.
 
@@ -57,12 +57,14 @@ Different keys represent different devices even when they share an IP or hostnam
    socket identities and authenticates to Hive.
 4. Hive resolves name collisions and registers selected targets on that transport.
    An acknowledged registration returns stable IDs and the resolved display name.
-5. Another device reads the directory and adds an SSH alias through native
-   `herdr machine add`. The alias chooses a share; no remote session override is used.
+5. Another device adds one `User hive` SSH alias through native `herdr machine add`.
+   Hive aggregates visible publications under `[Bee name] session / workspace`.
+   A `User s-…` alias optionally selects one share; no remote session override is used.
 6. Hive recognizes supported native bootstrap requests and maps them to fixed Bee
    operations. Bee returns live Herdr status or opens the selected client socket.
-7. Native input, events and terminal output stream in both directions with bounded
-   buffers. Hive does not decode, filter or record native terminal frames.
+7. Direct-sharing streams pass through unchanged. The aggregate endpoint decodes
+   the frozen generation-1 codecs, namespaces resources, routes operations and
+   retains bounded complete surfaces for switching. Neither path records terminals.
 8. Closing a consumer attachment closes its streams. Disabling publication closes
    all its streams before acknowledgement. Local Herdr processes survive.
 9. Hive loss disconnects remote streams. Bee retries with bounded exponential delay;
@@ -79,8 +81,9 @@ reconnect the entire Bee publication, favoring simple ownership over partial upd
 
 The integration target verified in this implementation is Herdr 0.9.0. Native
 bootstrap scripts are identified by exact requests or known discovery hashes.
-Unknown scripts are rejected, never executed. Protocol payloads otherwise pass
-through unchanged; Herdr remains the source of truth for native behavior.
+Unknown scripts are rejected, never executed. Direct-sharing payloads pass through
+unchanged. The aggregate codec and limits are specified in protocol/v1.md and
+hive/README.md; unsupported aggregate operations remain available by direct sharing ID.
 
 | Operation | Implementation / guarantee |
 | --- | --- |
@@ -88,7 +91,7 @@ through unchanged; Herdr remains the source of truth for native behavior.
 | Terminal input and text paste | Native client protocol; duplex input/output tested |
 | Interactive agent questions and approvals | Same terminal input path and full session authority; no separate approval ACL |
 | Workspace/tab/pane management | Native server semantics; all objects inside selected session are accessible |
-| Resize, scrollback and copy | Native Herdr behavior; transport does not translate terminal frames |
+| Resize, scrollback and copy | Native behavior; aggregate IDs and surfaces are translated |
 | Concurrent consumers / local owner input | Native Herdr concurrency semantics; no additional single-writer lease |
 | Agent state | Native Herdr events and detection; no proxy-pane metadata impersonation |
 | Images, terminal extensions, files | Whatever the supported Herdr native transport implements; not independently certified here. Hive does not add SFTP/SCP |
@@ -141,3 +144,9 @@ only their component executable. CI tests this module on both supported systems.
 replace its process image. SSH encryption state and goroutines are not migrated;
 connections briefly disconnect. This avoids a second relay generation, connection
 handoff protocol or supervisor service. No Herdr core changes are required.
+
+The `hive/internal/gateway` module owns each viewer's projection and routing event
+loop. Server adapters own SSH channels and hard write deadlines. Source loss
+removes its metadata and pending operations; other sources continue. Response IDs
+are bound to their originating source. Live image assets and terminal input modes
+are retained for coherent switching, within the documented resource limits.
