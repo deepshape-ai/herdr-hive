@@ -59,7 +59,8 @@ def main():
             def text():
                 result=call(sock,'pane.read',{'pane_id':panel,'format':'text','source':'visible'})
                 return json.dumps(result)
-            wait(lambda:'Connection' in text())
+            wait(lambda:'[1] Connection' in text() and '[2] Sharing' in text())
+            assert 'Enrollment token' in text()
             assert action(root)=='focus'
             assert len(call(sock,'pane.list',{'workspace_id':workspace})['panes'])==2
             # External CLI mutation must appear without a manual refresh.

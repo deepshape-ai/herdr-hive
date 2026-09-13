@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/deepshape-ai/herdr-hive/hive/internal/enrollment"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/herdr"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/registry"
 	"golang.org/x/crypto/ssh"
@@ -49,52 +49,44 @@ type binding struct {
 	down   atomic.Uint64
 }
 type Server struct {
-	Version, Executable string
-	Registry            *registry.Registry
-	AuthorizedKeys      string
-	mu                  sync.Mutex
-	shares              map[string]*binding
-	owners              map[string]*ssh.ServerConn
-	conns               map[net.Conn]bool
-	sem                 chan struct{}
-	wg                  sync.WaitGroup
-	channels            chan struct{}
-	started             time.Time
-	rejected            atomic.Uint64
-	operationTimeout    time.Duration
+	Version, Executable                               string
+	Registry                                          *registry.Registry
+	AuthorizedKeys                                    string
+	AuthorizedTokens, EnrollmentState, RegisteredKeys string
+	enrollMu                                          sync.Mutex
+	enrollSlots                                       chan struct{}
+	enrolled, enrollRejected                          atomic.Uint64
+	mu                                                sync.Mutex
+	shares                                            map[string]*binding
+	owners                                            map[string]*ssh.ServerConn
+	conns                                             map[net.Conn]bool
+	sem                                               chan struct{}
+	wg                                                sync.WaitGroup
+	channels                                          chan struct{}
+	started                                           time.Time
+	rejected                                          atomic.Uint64
+	operationTimeout                                  time.Duration
 }
 
 func New(r *registry.Registry, keys string) *Server {
-	return &Server{Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
+	return &Server{enrollSlots: make(chan struct{}, 4), Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
 }
-func (s *Server) auth(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+func (s *Server) auth(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	if _, certificate := key.(*ssh.Certificate); certificate {
-		return nil, errors.New("SSH certificates are not supported; register a plain device key")
+		return nil, errors.New("SSH certificates unsupported")
 	}
-	file, e := os.Open(s.AuthorizedKeys)
-	if e != nil {
-		return nil, e
+	if meta.User() == "enroll" {
+		return s.enrollAuth(key)
 	}
-	defer file.Close()
-	b, e := io.ReadAll(io.LimitReader(file, maxControl+1))
-	if len(b) > maxControl {
-		return nil, errors.New("authorized keys file exceeds 64 KiB")
+	external, e := enrollment.ReadAuthorizedKeys(s.AuthorizedKeys, false)
+	// Each source fails closed independently; never accept a prefix of a corrupt file.
+	matched := e == nil && enrollment.Contains(external, key)
+	if s.RegisteredKeys != "" {
+		registered, err := enrollment.ReadAuthorizedKeys(s.RegisteredKeys, true)
+		matched = matched || (err == nil && enrollment.Contains(registered, key))
 	}
-	if e != nil {
-		return nil, e
-	}
-	for len(b) > 0 {
-		k, _, options, rest, e := ssh.ParseAuthorizedKey(b)
-		if e != nil {
-			return nil, errors.New("invalid authorized keys file")
-		}
-		b = rest
-		if len(options) > 0 {
-			return nil, errors.New("authorized key options are not supported")
-		}
-		if string(k.Marshal()) == string(key.Marshal()) {
-			return &ssh.Permissions{Extensions: map[string]string{"owner": ssh.FingerprintSHA256(key)}}, nil
-		}
+	if matched {
+		return &ssh.Permissions{Extensions: map[string]string{"owner": ssh.FingerprintSHA256(key)}}, nil
 	}
 	return nil, errors.New("unregistered key")
 }
@@ -146,6 +138,18 @@ func (s *Server) Serve(ctx context.Context, l net.Listener, signer ssh.Signer) e
 				return
 			}
 			c.SetDeadline(time.Time{})
+			if conn.User() == "enroll" {
+				select {
+				case s.enrollSlots <- struct{}{}:
+				default:
+					s.enrollRejected.Add(1)
+					conn.Close()
+					return
+				}
+				defer func() { <-s.enrollSlots }()
+				timer := time.AfterFunc(15*time.Second, func() { c.Close() })
+				defer timer.Stop()
+			}
 			closed := make(chan struct{})
 			defer close(closed)
 			go heartbeat(conn, closed)
@@ -155,7 +159,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener, signer ssh.Signer) e
 			defer func() { conn.Close(); <-requestsDone; s.unpublish(conn); handlers.Wait() }()
 			slots := s.channels
 			for ch := range chans {
-				if ch.ChannelType() != "session" {
+				if conn.User() == "enroll" || ch.ChannelType() != "session" {
 					ch.Reject(ssh.Prohibited, "only application sessions are supported")
 					continue
 				}
@@ -173,8 +177,15 @@ func (s *Server) Serve(ctx context.Context, l net.Listener, signer ssh.Signer) e
 	}
 }
 func (s *Server) requests(c *ssh.ServerConn, reqs <-chan *ssh.Request) {
+	if c.User() == "enroll" {
+		s.enrollmentRequests(c, reqs)
+		return
+	}
 	for r := range reqs {
 		switch r.Type {
+		case "enroll@herdr-hive/v1":
+			s.enrollRejected.Add(1)
+			r.Reply(false, nil)
 		case "keepalive@openssh.com":
 			r.Reply(true, nil)
 		case "publish@herdr-hive/v1":

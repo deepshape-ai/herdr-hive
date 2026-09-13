@@ -9,7 +9,7 @@ is shared as a contract; there is no cross-component implementation import.
 
 | Component | Modules | Boundary |
 | --- | --- | --- |
-| Hive | `server`, `registry`, `herdr` | Authentication, bounded connection ownership, live directory, persistent name assignment and native request adaptation |
+| Hive | `server`, `registry`, `enrollment`, `herdr` | Authentication, bounded connection ownership, live directory, persistent name assignment and native request adaptation |
 | Bee | `app`, `config`, `publisher`, `herdr` | TUI/CLI parity, atomic saved intent, background connection, local session discovery and explicit socket access |
 
 The implementation uses Go and `golang.org/x/crypto/ssh`. Bee's SSH client owns one
@@ -47,6 +47,9 @@ Different keys represent different devices even when they share an IP or hostnam
 
 ## Publication and connection lifecycle
 
+0. Optionally, an administrator issues a token. Bee proves possession of its SSH
+   key and redeems the token over a verified short SSH connection before saving
+   configuration; Hive reserves usage, then persists the public key.
 1. The owner configures Hive, its verified host key and a local SSH identity file.
 2. Bee discovers named sessions through the local Herdr CLI. The owner chooses
    running sessions. Selection alone does not enable sharing.
@@ -107,6 +110,11 @@ window capacity, persistent limits and OS-level protections. Connection and chan
 budgets are global, so adding consumers cannot create unbounded relay buffers.
 Slow consumers backpressure the originating stream. Closing either side unblocks
 both copy directions and returns its capacity slot.
+
+Enrollment has four slots within the transport budget, one request and a
+15-second deadline. Administrator token hashes and service-owned enrollment
+usage/public keys are separate bounded files; offline token commands do not
+compete for the running service's state lock. See [enrollment operation](../hive/README.md#enrollment-tokens).
 
 Inspection is a private local Unix socket with text, watch and JSON CLI clients.
 It reads live metadata and counters, never terminal content. This avoids an extra

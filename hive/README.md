@@ -40,6 +40,56 @@ with memory, CPU and log-rate bounds. Install the binary and authorized-keys fil
 at its documented paths before enabling it. The service is optional; foreground
 execution is sufficient for evaluation.
 
+## Enrollment tokens
+
+Administrators can admit devices with a token instead of collecting public keys:
+
+```sh
+hive enroll issue --tokens ./authorized_tokens --label onboarding
+# Optional limits; omitted or zero means no expiry / unlimited devices:
+hive enroll issue --tokens ./authorized_tokens --ttl 24h --max-uses 5
+hive enroll list --tokens ./authorized_tokens --state-dir ./hive-state
+hive enroll revoke t-0123456789abcdef --tokens ./authorized_tokens
+```
+
+`issue` prints JSON with a `secret` beginning with `hreg-`, displayed only once.
+The administrator file stores SHA-256 hashes. Share the secret through a trusted
+channel. Start Hive with `--authorized-tokens ./authorized_tokens` to enable
+registration; without this flag enrollment is disabled. The required external
+`authorized_keys` file may be empty. To start with no tokens, initialize the token
+file to `[]` (an empty file or `null` is invalid).
+
+Token commands lock `<tokens>.lock` and atomically replace the token file. New
+files are mode 0600; existing modes are preserved. The service needs read access:
+for the supplied DynamicUser unit, use an administrator-owned directory and a
+root-owned 0644 token file. Issue and revoke take effect on the next request,
+without a restart. The service never writes the administrator file; `list` reads
+usage optionally, and these offline commands never write the service state.
+
+On a new device, verify Hive's host key and run:
+
+```sh
+bee configure --hive hive.example.internal:2222 \
+  --identity ~/.ssh/hive_device --known-hosts ~/.ssh/hive_known_hosts \
+  --token hreg-REPLACE_WITH_ISSUED_SECRET
+```
+
+The key is added to `state-dir/registered_keys`. Retrying an already registered
+key with a valid, unexpired token succeeds without consuming another use.
+Expiry and token revocation stop future enrollments, including retries; they do
+not remove enrolled devices. To revoke an enrolled device, stop Hive, delete its public-key line from
+`registered_keys`, then start Hive. Stopping prevents concurrent enrollment from
+overwriting the edit and terminates existing connections. Remove any copy from
+the external `authorized_keys` too; that externally managed file can be edited
+online, blocking new authentication.
+A device with a still-valid token can register again, so revoke its token too.
+Do not edit the service-owned `registered_keys` while Hive is running.
+
+Usage is stored in `enrollment.json` before the public key is written. Failed key
+writes roll back the new reservation. A crash may leave a reservation; retrying
+the same key resumes it without another use. Back up both files with the host
+key and names registry. Do not delete usage state to reset an active token's limit.
+
 ## Inspect
 
 ```sh
@@ -51,7 +101,7 @@ hive inspect --state-dir ./hive-state --json
 The private Unix inspection socket is accessible to the service account and host
 administrator. It remains separate from the SSH channel budget. It shows uptime,
 connections and limits, rejected capacity requests, Go heap/runtime allocation,
-registry bytes, active shares, connection counts and cumulative bytes in each
+registry bytes, enrollment enabled/accepted/rejected counters, active shares, connection counts and cumulative bytes in each
 direction. Runtime allocation is **not OS RSS**. Counters reset when a publication
 or Hive restarts; no history database or terminal preview is maintained.
 
@@ -106,7 +156,11 @@ promise. Sixteen channels give roughly 64 MiB of application receive-window
 capacity. Slow readers exert backpressure; Hive never accumulates a full session
 transcript. Herdr remains responsible for its own terminal history and output policy.
 
-Control payloads and the authorized-keys file are limited to 64 KiB. Bootstrap
+Control payloads, each key file, token file and enrollment usage file are limited
+to 64 KiB, with at most 1,024 tokens or keys per store. Invalid files fail closed;
+external and enrolled key sources are validated independently. Enrollment uses
+at most four authenticated transports within the global connection budget,
+one request per connection, no channels, and a 15-second connection deadline. Bootstrap
 and channel-open operations have deadlines. Dead network writes time out. The
 registry is one atomically replaced JSON file, capped by device count; Hive stores
 no audit/event history. Normal operation logs startup only. Inspect exposes live

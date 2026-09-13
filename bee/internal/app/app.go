@@ -20,6 +20,8 @@ import (
 	"github.com/deepshape-ai/herdr-hive/bee/internal/publisher"
 )
 
+var enrollDevice = publisher.Enroll
+
 type App struct {
 	Version    string
 	Executable string
@@ -46,7 +48,7 @@ func (a App) Execute(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "help", "--help", "-h":
-		fmt.Fprintln(a.Out, `bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH]
+		fmt.Fprintln(a.Out, `bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH] [--token hreg-…]
 bee name [NAME]
 bee sessions
 bee share SESSION
@@ -88,6 +90,7 @@ All noninteractive command results are JSON. Sharing grants full access to the s
 		f.SetOutput(a.Out)
 		h := f.String("hive", "", "Hive SSH host:port")
 		id := f.String("identity", "", "SSH identity file")
+		tok := f.String("token", "", "one-time input: enrollment token (never saved)")
 		kh := f.String("known-hosts", "", "known_hosts override (default: existing setting or ~/.ssh/known_hosts)")
 		if e := f.Parse(args[1:]); e != nil {
 			return e
@@ -105,19 +108,28 @@ All noninteractive command results are JSON. Sharing grants full access to the s
 		if _, e = os.Stat(ip); e != nil {
 			return e
 		}
-		return a.change(func(c *config.Config) error {
-			kp, err := knownHostsPath(*kh, c.KnownHosts)
-			if err != nil {
-				return err
+		current, e := config.Load(a.Dir)
+		if e != nil {
+			return e
+		}
+		kp, e := knownHostsPath(*kh, current.KnownHosts)
+		if e != nil {
+			return e
+		}
+		if _, e = os.Stat(kp); e != nil {
+			return e
+		}
+		if *tok != "" {
+			candidate := current
+			candidate.Hive = *h
+			candidate.IdentityFile = ip
+			candidate.KnownHosts = kp
+			if _, e = enrollDevice(ctx, candidate, *tok); e != nil {
+				return errors.New("enrollment failed; no settings were changed: " + e.Error())
 			}
-			if _, err = os.Stat(kp); err != nil {
-				return err
-			}
-			c.Hive = *h
-			c.IdentityFile = ip
-			c.KnownHosts = kp
-			return nil
-		})
+		}
+		return a.change(func(c *config.Config) error { c.Hive = *h; c.IdentityFile = ip; c.KnownHosts = kp; return nil })
+
 	case "name":
 		if len(args) == 1 {
 			c, e := config.Load(a.Dir)

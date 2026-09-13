@@ -30,7 +30,7 @@ override. No top-level `herdr bee` command is injected.
 ## First publication
 
 Create a dedicated SSH device identity if you do not already have one, register
-its public key with the Hive administrator, and verify Hive's host key. Encrypted
+its public key with the Hive administrator or obtain an enrollment token, and verify Hive's host key. Encrypted
 identities must be unlocked in the local SSH agent; Bee does not forward that agent.
 
 ```sh
@@ -59,6 +59,13 @@ continues retrying. Use `status` to distinguish saved intent from live connectiv
 changing share IDs. One device identity should belong to one Bee instance; a
 second concurrent publisher using that identity is rejected.
 
+To register and configure in one command, append `--token hreg-…` to
+`bee configure`. This requires Hive v0.2.0 with enrollment enabled. Registration
+runs before settings are saved; rejection leaves the configuration unchanged.
+The token is never written to `config.json` or command JSON output. The Connection
+panel offers the same optional masked token field and clears it after saving.
+Tokens do not replace host-key verification or the local SSH identity.
+
 ## Panel controls
 
 Bee opens beside the current pane. Open the action again to focus the existing
@@ -76,7 +83,7 @@ description = "Open Bee"
 
 | Input | Action |
 | --- | --- |
-| `1` / `2`, Left / Right | Connection / Sessions |
+| `1` / `2`, Left / Right | Connection / Sharing |
 | Tab / Shift+Tab, Up / Down | Move between fields or sessions |
 | Enter, click | Edit a field or activate a control |
 | Space, click a session | Share or unshare that session |
@@ -105,8 +112,9 @@ the existing Go binary. No browser, Node runtime or local web server is required
 | Terminal UI | CLI |
 | --- | --- |
 | Connection: Hive and SSH fields | `bee configure --hive … --identity … --known-hosts …` |
+| Connection: enrollment token | `bee configure --hive … --identity … --token hreg-…` |
 | Connection: visible name | `bee name NAME` |
-| Sessions: select or remove | `bee sessions`, `bee share NAME`, `bee unshare NAME` |
+| Sharing: select or remove | `bee sessions`, `bee share NAME`, `bee unshare NAME` |
 | Start / pause sharing | `bee enable`, `bee disable` |
 | Live connection status / refresh | `bee status` |
 | Update Bee | `bee update` |

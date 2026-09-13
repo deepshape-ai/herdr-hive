@@ -26,6 +26,9 @@ type Detail struct {
 	ToConsumer  uint64 `json:"bytes_to_consumer"`
 }
 type Snapshot struct {
+	EnrollEnabled  bool     `json:"enroll_enabled"`
+	Enrolled       uint64   `json:"enrolled"`
+	EnrollRejected uint64   `json:"enroll_rejected"`
 	PID            int      `json:"pid"`
 	Version        string   `json:"version"`
 	Executable     string   `json:"executable"`
@@ -47,7 +50,7 @@ func (s *Server) Snapshot() Snapshot {
 	runtime.ReadMemStats(&mem)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v := Snapshot{RegistryBytes: s.Registry.DiskBytes(), UptimeSeconds: int64(time.Since(s.started).Seconds()), Connections: len(s.conns), Channels: len(s.channels), MaxConnections: cap(s.sem), MaxChannels: cap(s.channels), Rejected: s.rejected.Load(), HeapBytes: mem.HeapAlloc, RuntimeBytes: mem.Sys, Goroutines: runtime.NumGoroutine(), Shares: []Detail{}}
+	v := Snapshot{EnrollEnabled: s.AuthorizedTokens != "", Enrolled: s.enrolled.Load(), EnrollRejected: s.enrollRejected.Load(), RegistryBytes: s.Registry.DiskBytes(), UptimeSeconds: int64(time.Since(s.started).Seconds()), Connections: len(s.conns), Channels: len(s.channels), MaxConnections: cap(s.sem), MaxChannels: cap(s.channels), Rejected: s.rejected.Load(), HeapBytes: mem.HeapAlloc, RuntimeBytes: mem.Sys, Goroutines: runtime.NumGoroutine(), Shares: []Detail{}}
 	for _, b := range s.shares {
 		v.Shares = append(v.Shares, Detail{b.share.ID, b.share.Name, b.share.Label, len(b.active), b.up.Load(), b.down.Load()})
 	}

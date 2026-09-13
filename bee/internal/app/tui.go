@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -39,7 +40,7 @@ type panelClick struct {
 }
 
 type panelModel struct {
-	dirtyFields                                            [3]bool
+	dirtyFields                                            [4]bool
 	ctx                                                    context.Context
 	app                                                    App
 	snapshot                                               panelSnapshot
@@ -73,11 +74,16 @@ func (a App) TUI(ctx context.Context) error {
 
 func newPanel(ctx context.Context, a App) panelModel {
 	m := panelModel{ctx: ctx, app: a, width: 60, height: 30, viewport: viewport.New()}
-	for _, placeholder := range []string{"hive.example.internal:2222", "Your device name", "/absolute/path/to/hive_device"} {
+	for _, placeholder := range []string{"hive.example.internal:2222", "Your device name", "/absolute/path/to/hive_device", "hreg-…"} {
 		input := textinput.New()
 		input.Prompt = ""
 		input.Placeholder = placeholder
 		input.CharLimit = 4096
+		if placeholder == "hreg-…" {
+			input.EchoMode = textinput.EchoPassword
+			input.EchoCharacter = '•'
+			input.CharLimit = 512
+		}
 		input.SetVirtualCursor(true)
 		m.fields = append(m.fields, input)
 	}
@@ -104,6 +110,15 @@ func newPanel(ctx context.Context, a App) panelModel {
 	m.execute = func(commands [][]string) tea.Cmd {
 		return func() tea.Msg {
 			for _, args := range commands {
+				// Keep token-bearing configure inside this process, out of child argv.
+				if args[0] == "configure" {
+					local := a
+					local.Out = io.Discard
+					if err := local.Execute(ctx, args); err != nil {
+						return panelDone{err: err}
+					}
+					continue
+				}
 				exe, err := a.executable()
 				if err != nil {
 					return panelDone{err: err}
@@ -162,7 +177,7 @@ func (m *panelModel) syncFields() {
 }
 func (m panelModel) itemCount() int {
 	if m.page == 0 {
-		return 4
+		return 5
 	}
 	return len(m.snapshot.sessions) + 1
 }
@@ -174,7 +189,7 @@ func (m *panelModel) activate() tea.Cmd {
 		return nil
 	}
 	if m.page == 0 {
-		if m.focus < 3 {
+		if m.focus < 4 {
 			m.editing = true
 			return m.fields[m.focus].Focus()
 		}
@@ -202,22 +217,26 @@ func (m *panelModel) save() tea.Cmd {
 	}
 	c := m.snapshot.config
 	values := []string{}
-	values = []string{c.Hive, c.Name, c.IdentityFile}
+	values = []string{c.Hive, c.Name, c.IdentityFile, ""}
 	for i, field := range m.fields {
 		if m.dirtyFields[i] {
 			values[i] = strings.TrimSpace(field.Value())
 		}
 	}
 	commands := [][]string{}
-	if values[0] != c.Hive || values[2] != c.IdentityFile {
-		commands = append(commands, []string{"configure", "--hive", values[0], "--identity", values[2]})
+	if values[0] != c.Hive || values[2] != c.IdentityFile || values[3] != "" {
+		args := []string{"configure", "--hive", values[0], "--identity", values[2]}
+		if values[3] != "" {
+			args = append(args, "--token", values[3])
+		}
+		commands = append(commands, args)
 	}
 	if values[1] != c.Name {
 		commands = append(commands, []string{"name", values[1]})
 	}
 	if len(commands) == 0 {
 		m.dirty = false
-		m.dirtyFields = [3]bool{}
+		m.dirtyFields = [4]bool{}
 		return nil
 	}
 	return m.run(commands...)
@@ -282,8 +301,9 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.message, m.messageError = "Changes saved.", false
 			if msg.saved {
+				m.fields[3].SetValue("")
 				m.dirty = false
-				m.dirtyFields = [3]bool{}
+				m.dirtyFields = [4]bool{}
 			}
 			if msg.update {
 				m.restart = true
@@ -347,7 +367,7 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delta = -1
 				}
 				m.move(delta)
-				m.editing = m.focus < 3
+				m.editing = m.focus < 4
 				if m.editing {
 					cmd = m.fields[m.focus].Focus()
 				}

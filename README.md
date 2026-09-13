@@ -60,6 +60,13 @@ share the printed host-key fingerprint with members through a trusted channel.
 For a managed Linux service with resource limits, use the
 [systemd deployment instructions](hive/README.md#start).
 
+Optionally, admit new devices with a token instead of collecting their public keys.
+Run `hive enroll issue --tokens ./authorized_tokens`, and add
+`--authorized-tokens "$PWD/authorized_tokens"` when starting Hive. New devices
+can then use `bee configure --hive HOST:PORT --identity PATH --known-hosts PATH
+--token hreg-…` after verifying Hive's host key. The Connection panel also accepts
+a token. See [token issuance, limits and revocation](hive/README.md#enrollment-tokens).
+
 ### 2. Install Bee inside Herdr
 
 ```sh

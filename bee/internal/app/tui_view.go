@@ -34,7 +34,7 @@ func (m panelModel) body() (string, []int) {
 		add(st.text.Bold(true).Render("Connection"))
 		add(st.muted.Render("Your agent stays on this machine."))
 		add("")
-		labels := []string{"Hive address", "Visible name", "SSH identity"}
+		labels := []string{"Hive address", "Visible name", "SSH identity", "Enrollment token"}
 		for i, label := range labels {
 			rows = append(rows, len(lines))
 			marker := "  "
@@ -43,7 +43,7 @@ func (m panelModel) body() (string, []int) {
 			}
 			add(st.muted.Render(marker + label))
 			value := m.fields[i].View()
-			if !m.editing || m.focus != i {
+			if i != 3 && (!m.editing || m.focus != i) {
 				value = safePanel(m.fields[i].Value())
 				if value == "" {
 					value = st.muted.Render(m.fields[i].Placeholder)
@@ -66,7 +66,7 @@ func (m panelModel) body() (string, []int) {
 		if m.busy {
 			label = " Working… "
 		}
-		if m.focus == 3 {
+		if m.focus == 4 {
 			add(st.badge.Render(label))
 		} else {
 			add(st.accent.Render(label))
@@ -142,7 +142,7 @@ func (m *panelModel) layout() {
 	if m.focus != m.lastFocus || m.page != m.lastPage || m.height != m.lastHeight {
 		if m.focus < len(rows) {
 			row := rows[m.focus]
-			if m.page == 0 && m.focus < 3 {
+			if m.page == 0 && m.focus < 4 {
 				row++
 			}
 			m.viewport.EnsureVisible(row, 0, 0)
@@ -177,9 +177,9 @@ func (m panelModel) View() tea.View {
 		brand = st.badge.Render(" BEE ")
 	}
 	header := brand + strings.Repeat(" ", max(1, width-lipgloss.Width(brand)-lipgloss.Width(status))) + statusStyle.Render(status)
-	tabs := []string{" 1 Connection ", " 2 Sessions "}
-	if width < 30 {
-		tabs = []string{"1 Connect", "2 Sessions"}
+	tabs := []string{" [1] Connection ", " [2] Sharing "}
+	if width < 31 {
+		tabs = []string{"[1] Connect", "[2] Sharing"}
 	}
 	firstTabWidth := lipgloss.Width(tabs[0])
 	secondTabWidth := lipgloss.Width(tabs[1])
@@ -242,7 +242,7 @@ func (m panelModel) View() tea.View {
 		} else if y >= 5 && y < 5+m.viewport.Height() {
 			row := y - 5 + offset
 			for i, start := range rows {
-				if row == start || (m.page == 0 && i < 3 && row == start+1) {
+				if row == start || (m.page == 0 && i < 4 && row == start+1) {
 					target = i
 					break
 				}

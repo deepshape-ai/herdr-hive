@@ -59,19 +59,43 @@ def main():
     for component in ('hive','bee'):
         run(['go','-C',ROOT/component,'build','-ldflags','-X main.version=0.0.1',
              '-o',install/component,'./cmd/'+component],timeout=90)
-    for who in ['hive', 'a', 'b', 'c', 'consumer']:
+    for who in ['hive', 'a', 'b', 'c', 'd', 'consumer']:
         (R / who).mkdir(mode=0o700)
-    for who in ['a', 'b', 'c', 'consumer']:
+    for who in ['a', 'b', 'c', 'd', 'consumer']:
         run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', R / who / 'key'])
     keys = R / 'authorized_keys'
     keys.write_text(''.join((R / w / 'key.pub').read_text() for w in ['a', 'b', 'c', 'consumer']))
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
+    tokens=R/'authorized_tokens'
+    issued=json.loads(run([install/'hive','enroll','issue','--tokens',tokens,'--max-uses','1']).stdout)
     hive = spawn([install / 'hive', '--state-dir', R/'hive', '--authorized-keys', keys,
-                  '--listen', f'127.0.0.1:{port}'], 'hive')
+                  '--authorized-tokens',tokens,'--listen', f'127.0.0.1:{port}'], 'hive')
     wait(lambda: (R/'hive/host_key').exists())
     pub = run(['ssh-keygen', '-y', '-f', R/'hive/host_key']).stdout.strip()
     known = R/'known_hosts'; known.write_text(f'[127.0.0.1]:{port} {pub}\n')
+    # Device d is absent from the external allowlist. Configure registers before saving.
+    denv=dict(BASE,BEE_CONFIG_DIR=str(R/'d/bee'))
+    dargs=[ROOT/'dist/bee','configure','--hive',f'127.0.0.1:{port}','--identity',R/'d/key','--known-hosts',known,'--token',issued['secret']]
+    run(dargs,denv);run(dargs,denv)
+    saved=(R/'d/bee/config.json').read_bytes()
+    assert issued['secret'].encode() not in saved
+    assert (R/'d/key.pub').read_text().split()[1] in (R/'hive/registered_keys').read_text()
+    dssh=['/usr/bin/ssh','-F','/dev/null','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o',f'UserKnownHostsFile={known}','-i',R/'d/key','-p',str(port),'hive@127.0.0.1','list --json']
+    assert json.loads(run(dssh).stdout)==[]
+    other=list(dargs);other[5]=R/'consumer/key'
+    assert run(other,denv,check=False).returncode!=0
+    assert (R/'d/bee/config.json').read_bytes()==saved
+    run([install/'hive','enroll','revoke',issued['id'],'--tokens',tokens])
+    assert run(dargs,denv,check=False).returncode!=0
+    assert (R/'d/bee/config.json').read_bytes()==saved
+    expired=json.loads(run([install/'hive','enroll','issue','--tokens',tokens,'--ttl','1ns']).stdout)
+    expiredargs=list(dargs);expiredargs[-1]=expired['secret']
+    assert run(expiredargs,denv,check=False).returncode!=0
+    assert (R/'d/bee/config.json').read_bytes()==saved
+    inspect=json.loads(run([install/'hive','inspect','--state-dir',R/'hive','--json']).stdout)
+    assert inspect['enroll_enabled'] and inspect['enrolled']==2 and inspect['enroll_rejected']==3
+    result['enrollment_idempotency_limits_expiry_revocation_config_atomicity']=True
     envs, shares = {}, {}
     for who in 'abc':
         conf = R/who/'herdr'; conf.mkdir()

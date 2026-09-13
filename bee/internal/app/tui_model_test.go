@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/herdr"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/publisher"
@@ -127,7 +128,7 @@ func TestPanelFramesFitAndExposeControls(t *testing.T) {
 				m.snapshot.sessions[0].Name = "项目 " + strings.Repeat("long-name", 30)
 				m.message = strings.Repeat("connection failed ", 30)
 				m.layout()
-				frame := m.View().Content
+				frame := ansi.Strip(m.View().Content)
 				if lipgloss.Width(frame) > m.width || lipgloss.Height(frame) > m.height {
 					t.Fatalf("frame overflow %v page %d: %dx%d", size, page, lipgloss.Width(frame), lipgloss.Height(frame))
 				}
@@ -250,10 +251,47 @@ func TestPanelSmallViewportKeepsSelectedSessionVisible(t *testing.T) {
 
 func TestPanelOmitsKnownHostsControl(t *testing.T) {
 	m := readyPanel()
-	if len(m.fields) != 3 || m.itemCount() != 4 {
+	if len(m.fields) != 4 || m.itemCount() != 5 {
 		t.Fatal("unexpected connection controls")
 	}
 	if strings.Contains(m.View().Content, "known_hosts") {
 		t.Fatal("advanced SSH setting exposed in panel")
+	}
+}
+
+func TestEnrollmentTokenMaskedAndSavedAlone(t *testing.T) {
+	m := newPanel(context.Background(), App{})
+	m.ready = true
+	m.snapshot.config = config.Config{Hive: "host:2222", Name: "Device", IdentityFile: "/key"}
+	m.syncFields()
+	token := "hreg-" + strings.Repeat("a", 64)
+	m.fields[3].SetValue(token)
+	m.dirty = true
+	m.dirtyFields[3] = true
+	for _, editing := range []bool{false, true} {
+		m.editing = editing
+		m.focus = 3
+		m.layout()
+		frame := ansi.Strip(m.View().Content)
+		if strings.Contains(frame, token) || strings.Contains(frame, strings.Repeat("a", 10)) {
+			t.Fatal("token exposed")
+		}
+	}
+	var commands [][]string
+	m.execute = func(args [][]string) tea.Cmd { commands = args; return nil }
+	m.save()
+	if len(commands) != 1 || len(commands[0]) != 7 || commands[0][5] != "--token" || commands[0][6] != token {
+		t.Fatalf("commands: %v", commands)
+	}
+	m.busy = false
+	next, _ := m.Update(panelDone{saved: true})
+	m = next.(panelModel)
+	if m.fields[3].Value() != "" {
+		t.Fatal("token retained after save")
+	}
+	m.focus = 0
+	m.layout()
+	if !strings.Contains(ansi.Strip(m.View().Content), "[1] Connection") || !strings.Contains(ansi.Strip(m.View().Content), "[2] Sharing") {
+		t.Fatalf("tabs missing: %q", m.View().Content)
 	}
 }

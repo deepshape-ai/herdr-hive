@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/deepshape-ai/herdr-hive/hive/internal/enrollment"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/registry"
 	"github.com/deepshape-ai/herdr-hive/hive/internal/server"
 	"golang.org/x/crypto/ssh"
@@ -48,6 +49,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "enroll" {
+		return enroll(os.Args[2:])
+	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println(version)
 		return nil
@@ -63,6 +67,7 @@ func run() error {
 	maxChannels := f.Int("max-channels", 16, "maximum application channels across all consumers")
 	listen := f.String("listen", "127.0.0.1:2222", "SSH listen address")
 	state := f.String("state-dir", "", "private state directory (required)")
+	tokens := f.String("authorized-tokens", "", "administrator token file (optional; enables enrollment)")
 	keys := f.String("authorized-keys", "", "registered device public keys (required)")
 	if e := f.Parse(os.Args[1:]); e != nil {
 		return e
@@ -72,6 +77,11 @@ func run() error {
 	}
 	if *state == "" || *keys == "" || f.NArg() != 0 {
 		return fmt.Errorf("usage: hive --state-dir PATH --authorized-keys PATH [--listen HOST:PORT]")
+	}
+	if *tokens != "" {
+		if _, e := enrollment.LoadTokens(*tokens); e != nil {
+			return e
+		}
 	}
 	if e := os.MkdirAll(*state, 0700); e != nil {
 		return e
@@ -150,6 +160,7 @@ func run() error {
 	}()
 	slog.Info("Hive listening", "address", l.Addr(), "host_key", ssh.FingerprintSHA256(signer.PublicKey()), "version", version)
 	gateway := server.New(r, *keys)
+	gateway.Enrollment(*tokens, filepath.Join(*state, "enrollment.json"), filepath.Join(*state, "registered_keys"))
 	gateway.Version = version
 	gateway.Executable = executable
 	inspectionDone := make(chan struct{})
@@ -209,6 +220,7 @@ func inspect(args []string) error {
 				fmt.Print("\x1b[2J\x1b[H")
 			}
 			fmt.Printf("Hive · %ds uptime\nSSH connections %d/%d · channels %d/%d · rejected %d\nGo heap %.1f MiB · runtime %.1f MiB · goroutines %d · registry %d B\n\n", s.UptimeSeconds, s.Connections, s.MaxConnections, s.Channels, s.MaxChannels, s.Rejected, float64(s.HeapBytes)/(1<<20), float64(s.RuntimeBytes)/(1<<20), s.Goroutines, s.RegistryBytes)
+			fmt.Printf("Enrollment: enabled=%t accepted=%d rejected=%d\n", s.EnrollEnabled, s.Enrolled, s.EnrollRejected)
 			for _, d := range s.Shares {
 				fmt.Printf("%s  %s / %s  connections=%d  up=%d B  down=%d B\n", d.ID, d.Name, d.Session, d.Connections, d.ToPublisher, d.ToConsumer)
 			}

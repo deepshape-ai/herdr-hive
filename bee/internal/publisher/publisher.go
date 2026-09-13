@@ -17,7 +17,6 @@ import (
 	"github.com/deepshape-ai/herdr-hive/bee/internal/herdr"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type Share struct {
@@ -134,35 +133,13 @@ func connect(ctx context.Context, c config.Config, state *State) error {
 		bound[r.Key] = b
 		shares = append(shares, Share{Key: r.Key, Label: r.Session})
 	}
-	method, cleanup, e := auth(ctx, c)
+	client, cleanup, e := dial(ctx, c, "bee", "SSH-2.0-HerdrBee")
 	if e != nil {
 		return e
 	}
 	defer cleanup()
-	hostkey, e := knownhosts.New(c.KnownHosts)
-	if e != nil {
-		return e
-	}
-	raw, e := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", c.Hive)
-	if e != nil {
-		return e
-	}
-	defer raw.Close()
 	stopped := make(chan struct{})
 	defer close(stopped)
-	go func() {
-		select {
-		case <-ctx.Done():
-			raw.Close()
-		case <-stopped:
-		}
-	}()
-	conn, chans, reqs, e := ssh.NewClientConn(idleConn{raw}, c.Hive, &ssh.ClientConfig{User: "bee", Auth: []ssh.AuthMethod{method}, HostKeyCallback: hostkey, ClientVersion: "SSH-2.0-HerdrBee"})
-	if e != nil {
-		return e
-	}
-	client := ssh.NewClient(conn, chans, reqs)
-	defer client.Close()
 	incoming := client.HandleChannelOpen("bee-stream-v1")
 	payload, _ := json.Marshal(struct {
 		Version int     `json:"version"`

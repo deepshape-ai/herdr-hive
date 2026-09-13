@@ -41,6 +41,13 @@ cd "$HOME/.local/share/herdr-hive"
 
 保持进程运行，让办公内网能够访问端口 2222，并通过可信渠道将启动时打印的主机密钥指纹告知成员。Linux 常驻服务和资源限制配置见 [systemd 部署说明](hive/README.md#start)。
 
+也可以使用注册令牌接入新设备，省去手工收集公钥：管理员运行
+`hive enroll issue --tokens ./authorized_tokens`，并在 Hive 启动参数中增加
+`--authorized-tokens "$PWD/authorized_tokens"`。新设备核验 Hive 主机密钥后，
+在 `bee configure --hive HOST:PORT --identity PATH --known-hosts PATH` 后追加
+`--token hreg-…` 即可注册并保存配置；Connection 面板也有令牌输入框。
+令牌支持有效期、使用次数和即时撤销，详见[注册令牌](hive/README.md#enrollment-tokens)。
+
 ### 2. 在 Herdr 中安装 Bee
 
 ```sh
