@@ -9,13 +9,14 @@ and switch sharing on or off. Its TUI and CLI call the same application logic.
 For download, checksum and first-run commands, start with the
 [Bee Quickstart](../README.md#2-install-bee-inside-herdr).
 
-Unpack the Bee release for your OS/architecture into a permanent directory and
-link that directory with Herdr:
+Install the newest stable release and register the plugin automatically:
 
 ```sh
-herdr plugin link /path/to/bee-darwin-arm64 --enabled
+curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
 herdr plugin pane open --plugin herdr.bee --entrypoint settings
 ```
+
+The shell installer detects your OS and architecture and verifies the download.
 
 The archive contains `bee` and `herdr-plugin.toml`. No Go runtime is needed. For
 local development, `make package` produces the same directory under `dist/`.

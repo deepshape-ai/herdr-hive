@@ -1,5 +1,7 @@
 # Herdr Hive
 
+[English](README.md) | [简体中文](README.zh.md)
+
 Share selected Herdr sessions through a central SSH relay. Keep agents on their
 owners' machines and consume them with native `herdr machine add`.
 
@@ -26,30 +28,20 @@ independent community project, not an official Herdr product.
 
 ## Quickstart
 
-Install [Herdr 0.9.0](https://github.com/herdrdev/herdr/releases/tag/v0.9.0) on
-publishing and consuming hosts. The relay machine needs only Hive. No Go or
-JavaScript runtime is required. Install Hive once on the shared machine and Bee
-on each host that will publish sessions.
+Install [Herdr](https://herdr.dev/) on publishing and consuming hosts.
+The installer uses **sh, curl, tar and SHA-256 tools** already available on most
+macOS and Linux hosts. No additional language runtime is required.
+It selects the component's newest stable release, detects macOS/Linux and
+amd64/arm64, and verifies the release checksum. No version or platform selection
+is needed. Install Hive once on the shared machine and Bee on publishing hosts.
 
 ### 1. Install Hive on the shared machine
 
-This example uses **Linux amd64**. For Linux arm64 or macOS, choose the matching
-archive from [Hive releases](https://github.com/deepshape-ai/herdr-hive/releases/tag/hive/v0.1.0)
-and change the filename below. On macOS, use `shasum -a 256 --check -`
-instead of `sha256sum --check -`.
-
 ```sh
-(
-set -e
-mkdir -p "$HOME/.local/share/herdr-hive"
-cd "$HOME/.local/share/herdr-hive"
-curl --fail --location --remote-name https://github.com/deepshape-ai/herdr-hive/releases/download/hive/v0.1.0/hive-0.1.0-linux-amd64.tar.gz
-curl --fail --location --remote-name https://github.com/deepshape-ai/herdr-hive/releases/download/hive/v0.1.0/SHA256SUMS
-awk '$2 == "hive-0.1.0-linux-amd64.tar.gz"' SHA256SUMS | sha256sum --check -
-tar -xzf hive-0.1.0-linux-amd64.tar.gz --strip-components=1
-mkdir -m 700 state
-)
+curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- hive
 ```
+
+Installs into `~/.local/share/herdr-hive` and creates its private `state` directory.
 
 Create `authorized_keys` in this directory with the dedicated **public** keys of
 participating devices, one per line. The next section shows how each device
@@ -70,27 +62,14 @@ For a managed Linux service with resource limits, use the
 
 ### 2. Install Bee inside Herdr
 
-This example uses **macOS Apple Silicon** (`darwin-arm64`). Other builds are on
-the [Bee release page](https://github.com/deepshape-ai/herdr-hive/releases/tag/bee/v0.1.0).
-Use `darwin-amd64` for Intel Macs, or `linux-amd64` / `linux-arm64` for Linux.
-
 ```sh
-(
-set -e
-mkdir -p "$HOME/.local/share/herdr-bee"
-cd "$HOME/.local/share/herdr-bee"
-curl --fail --location --remote-name https://github.com/deepshape-ai/herdr-hive/releases/download/bee/v0.1.0/bee-0.1.0-darwin-arm64.tar.gz
-curl --fail --location --remote-name https://github.com/deepshape-ai/herdr-hive/releases/download/bee/v0.1.0/SHA256SUMS
-awk '$2 == "bee-0.1.0-darwin-arm64.tar.gz"' SHA256SUMS | shasum -a 256 --check -
-tar -xzf bee-0.1.0-darwin-arm64.tar.gz --strip-components=1
-herdr plugin link "$PWD" --enabled
+curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
 herdr plugin pane open --plugin herdr.bee --entrypoint settings
-)
 ```
 
-The executable stays in the plugin directory; **no global `bee` command or PATH
-change is required**. On Linux, use `sha256sum --check -` for the checksum step.
-Proceed with extraction only after the checksum command reports `OK`.
+Installs into `~/.local/share/herdr-bee` and automatically links and enables the
+Herdr plugin. The executable stays in that directory; no global `bee` command
+or PATH change is required.
 
 Create a dedicated device key if you do not already have one:
 
@@ -158,6 +137,9 @@ and activate the new program. Downloads keep current sharing online; activation
 briefly disconnects viewers and the publishers reconnect. Local agents, settings
 and share IDs are preserved. This is **not a zero-disconnection hot update**.
 
+The installer is for new installations and leaves existing directories untouched.
+Use the commands above for upgrades. For a custom installation path, append
+`--install-dir /absolute/path` to the installer command.
 [Update details](docs/UPDATING.md).
 
 ## Build

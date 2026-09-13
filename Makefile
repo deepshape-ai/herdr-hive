@@ -1,4 +1,4 @@
-.PHONY: build build-hive build-bee test vet package package-hive package-bee clean
+.PHONY: build build-hive build-bee test test-installer vet package package-hive package-bee clean
 VERSION ?= 0.1.0-dev
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -9,7 +9,10 @@ build-hive:
 build-bee:
 	mkdir -p dist
 	cd bee && GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=$(VERSION)' -o ../dist/bee ./cmd/bee
-test:
+test-installer:
+	sh -n install.sh
+	python3 -B tests/test_install.py
+test: test-installer
 	cd internal/update && go test -race ./...
 	cd hive && go test -race ./...
 	cd bee && go test -race ./...
