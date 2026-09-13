@@ -1,0 +1,122 @@
+# Architecture
+
+Hive and Bee are independent products in one repository. Bee is installed by
+publishers; Hive is operated centrally; consumers use unchanged Herdr and OpenSSH.
+Each component owns its dependencies and release. Only [protocol v1](../protocol/v1.md)
+is shared as a contract; there is no cross-component implementation import.
+
+## Responsibilities
+
+| Component | Modules | Boundary |
+| --- | --- | --- |
+| Hive | `server`, `registry`, `herdr` | Authentication, bounded connection ownership, live directory, persistent name assignment and native request adaptation |
+| Bee | `app`, `config`, `publisher`, `herdr` | TUI/CLI parity, atomic saved intent, background connection, local session discovery and explicit socket access |
+
+The implementation uses Go and `golang.org/x/crypto/ssh`. Bee's SSH client owns one
+outbound transport with multiplexed reverse channels. A custom application channel
+keeps the publication restricted to fixed operations; it is not a general reverse
+port tunnel. Hive's consumer-facing side speaks ordinary SSH, so OpenSSH and native
+Herdr need no replacement. SSH cryptography and flow control are library functions.
+
+The only persistent Hive metadata is a bounded owner-fingerprint-to-visible-name
+map. Atomic JSON plus a single-process file lock is sufficient for this small
+registry; adding SQLite would add maintenance without a current query requirement.
+Live shares and streams are memory-only. No terminal history, event database,
+message queue, metrics database or web server is introduced.
+
+## Resource and identity model
+
+- **Device:** a dedicated SSH public key. Use the same key for Bee and native
+  consumption on one machine. A hostname is only a suggested display name.
+- **Manual rule:** an explicitly selected Herdr named session plus a random local
+  rule key. It remains selected while sharing is globally off.
+- **Share:** a stable opaque SSH username derived from device identity and rule key.
+  The share routes to exactly one selected server; it is not a login credential.
+- **Connection:** a live registration and zero or more native consumer streams.
+  Reconnect creates new streams; it never replays old input.
+
+All registered Hive devices receive full control of published named sessions.
+Unselected named sessions are not registered. This does not isolate the agent's
+system permissions or subdivide a selected session's workspaces. A session may
+continue to change or restart under the same selected name. Fine ACLs, read-only
+roles and control leases are intentionally absent from this product scope.
+
+Hive hides a device's own publications from `list --json` and rejects self-routing.
+Native Herdr's locally saved profiles are owned by Herdr and are not edited by Bee.
+Different keys represent different devices even when they share an IP or hostname.
+
+## Publication and connection lifecycle
+
+1. The owner configures Hive, its verified host key and a local SSH identity file.
+2. Bee discovers named sessions through the local Herdr CLI. The owner chooses
+   running sessions. Selection alone does not enable sharing.
+3. Enabling starts one background publisher. Bee binds the selected API/client
+   socket identities and authenticates to Hive.
+4. Hive resolves name collisions and registers selected targets on that transport.
+   An acknowledged registration returns stable IDs and the resolved display name.
+5. Another device reads the directory and adds an SSH alias through native
+   `herdr machine add`. The alias chooses a share; no remote session override is used.
+6. Hive recognizes supported native bootstrap requests and maps them to fixed Bee
+   operations. Bee returns live Herdr status or opens the selected client socket.
+7. Native input, events and terminal output stream in both directions with bounded
+   buffers. Hive does not decode, filter or record native terminal frames.
+8. Closing a consumer attachment closes its streams. Disabling publication closes
+   all its streams before acknowledgement. Local Herdr processes survive.
+9. Hive loss disconnects remote streams. Bee retries with bounded exponential delay;
+   Hive restarts with an empty online directory. Valid re-registration restores the
+   same IDs. Unknown protocol/config versions fail closed.
+
+A saved manual rule deliberately identifies a named session, not an agent PID.
+Within a connected publication, changed socket identities reject new streams.
+Refresh publication after a local server replacement. Bytes already written into
+Herdr or terminal buffers cannot be recalled. Configuration changes currently
+reconnect the entire Bee publication, favoring simple ownership over partial updates.
+
+## Native compatibility
+
+The integration target verified in this implementation is Herdr 0.9.0. Native
+bootstrap scripts are identified by exact requests or known discovery hashes.
+Unknown scripts are rejected, never executed. Protocol payloads otherwise pass
+through unchanged; Herdr remains the source of truth for native behavior.
+
+| Operation | Implementation / guarantee |
+| --- | --- |
+| Add remote machine, display colleague label | Native `machine add`; tested |
+| Terminal input and text paste | Native client protocol; duplex input/output tested |
+| Interactive agent questions and approvals | Same terminal input path and full session authority; no separate approval ACL |
+| Workspace/tab/pane management | Native server semantics; all objects inside selected session are accessible |
+| Resize, scrollback and copy | Native Herdr behavior; transport does not translate terminal frames |
+| Concurrent consumers / local owner input | Native Herdr concurrency semantics; no additional single-writer lease |
+| Agent state | Native Herdr events and detection; no proxy-pane metadata impersonation |
+| Images, terminal extensions, files | Whatever the supported Herdr native transport implements; not independently certified here. Hive does not add SFTP/SCP |
+| Close local machine profile | Native detach; does not stop owner's server |
+| Close/kill remote pane | Native remote operation, including destructive effects allowed by full control |
+| Restart/resume agent | Available native UI behavior; Hive does not launch or resume agents |
+| Remote CLI/API routing | Exactly the selected Herdr release's native support. v0.9.0 does not gain newer `--machine agent` commands through Bee |
+| Remote Herdr install/upgrade, session override | Rejected by the bootstrap allowlist; upgrade explicitly on the owner host |
+
+The main maintenance risk is the native bootstrap contract, which Herdr does not
+expose as a stable plugin transport API. Changes are isolated in
+`hive/internal/herdr` and verified using native integration tests. Compatible native
+payload changes need no relay rewrite; arbitrary future versions are not promised.
+
+## Resource control and observability
+
+[Hive's resource envelope](../hive/README.md#resource-envelope) defines defaults,
+window capacity, persistent limits and OS-level protections. Connection and channel
+budgets are global, so adding consumers cannot create unbounded relay buffers.
+Slow consumers backpressure the originating stream. Closing either side unblocks
+both copy directions and returns its capacity slot.
+
+Inspection is a private local Unix socket with text, watch and JSON CLI clients.
+It reads live metadata and counters, never terminal content. This avoids an extra
+web service, authentication surface or metrics store. Memory readings explicitly
+distinguish Go heap/runtime allocation from OS RSS.
+
+## Sources
+
+- [Herdr native machine CLI](https://github.com/herdrdev/herdr/blob/v0.9.0/src/cli/machine.rs)
+- [Herdr SSH bootstrap and attach](https://github.com/herdrdev/herdr/blob/v0.9.0/src/remote/attach.rs)
+- [Herdr remote client socket bridge](https://github.com/herdrdev/herdr/blob/v0.9.0/src/remote/host_unix.rs)
+- [Herdr plugin manifest](https://github.com/herdrdev/herdr/blob/v0.9.0/src/app/api/plugins/manifest.rs)
+- [Go SSH implementation](https://pkg.go.dev/golang.org/x/crypto/ssh)

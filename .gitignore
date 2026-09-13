@@ -1,0 +1,10 @@
+.local/
+.r/
+dist/
+*.test
+*.prof
+.DS_Store
+.env
+.env.*
+*.pem
+*.key

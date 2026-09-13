@@ -1,0 +1,30 @@
+id = "herdr.bee"
+name = "Bee"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Publish selected Herdr named sessions to Hive"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["./bee", "restore"]
+
+[[actions]]
+id = "configure"
+title = "Bee: configure sharing"
+command = ["herdr", "plugin", "pane", "open", "--plugin", "herdr.bee", "--entrypoint", "settings"]
+
+[[actions]]
+id = "enable"
+title = "Bee: enable sharing"
+command = ["./bee", "enable"]
+
+[[actions]]
+id = "disable"
+title = "Bee: disable sharing"
+command = ["./bee", "disable"]
+
+[[panes]]
+id = "settings"
+title = "Bee"
+placement = "overlay"
+command = ["./bee", "tui"]

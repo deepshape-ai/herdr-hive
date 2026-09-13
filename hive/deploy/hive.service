@@ -1,0 +1,28 @@
+[Unit]
+Description=Herdr Hive SSH relay
+After=network.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=herdr-hive
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/hive --listen 0.0.0.0:2222 --state-dir /var/lib/herdr-hive --authorized-keys /etc/herdr-hive/authorized_keys
+Restart=on-failure
+RestartSec=5
+Environment=GOMEMLIMIT=160MiB GOMAXPROCS=2
+MemoryHigh=192M
+MemoryMax=256M
+TasksMax=128
+LimitNOFILE=1024
+CPUQuota=100%
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+LogRateLimitIntervalSec=60s
+LogRateLimitBurst=20
+
+[Install]
+WantedBy=multi-user.target

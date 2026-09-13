@@ -1,0 +1,57 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [hive, bee]
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: ${{ matrix.component }}/go.mod
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./cmd/...
+  native:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: hive/go.mod
+          cache-dependency-path: '**/go.sum'
+      - name: Install the pinned native integration target
+        env:
+          HERDR_SHA256: 4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
+        run: |
+          mkdir -p .local/bin
+          curl --fail --location --retry 3 https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64 -o .local/bin/herdr
+          echo "$HERDR_SHA256  .local/bin/herdr" | sha256sum --check
+          chmod 755 .local/bin/herdr
+          echo "$PWD/.local/bin" >> "$GITHUB_PATH"
+          python3 -m venv .local/venv
+          .local/venv/bin/pip install -r tests/integration/requirements.txt
+      - run: make package VERSION=0.1.0-ci
+      - run: .local/venv/bin/python tests/integration/native.py
