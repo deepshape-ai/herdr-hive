@@ -64,7 +64,7 @@ For a managed Linux service with resource limits, use the
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
-herdr plugin pane open --plugin herdr.bee --entrypoint settings
+herdr plugin action invoke configure --plugin herdr.bee
 ```
 
 Installs into `~/.local/share/herdr-bee` and automatically links and enables the
@@ -85,13 +85,15 @@ verify its fingerprint against the administrator's value before adding it to a
 `known_hosts` file. For example, `ssh-keyscan -p 2222 hive.example.internal`
 retrieves a candidate key; scanning alone does not verify its identity.
 
-In Bee's settings pane:
+Bee opens in a separate split pane. The same action focuses the existing panel
+in this tab, or closes it when already focused. Use `prefix+alt+b` after adding
+[the shortcut](bee/README.md#panel-controls).
 
-1. **Configure Hive:** enter `hive.example.internal:2222`, the absolute path to
-   `hive_device`, and the absolute path to your verified `known_hosts` file.
-2. **Change visible name:** keep the hostname default or choose your own name.
-3. **Select shared sessions:** select an existing, running Herdr named session.
-4. **Toggle all sharing:** enable publication and check that `Connected` is true.
+1. In **Connection**, enter the Hive address, visible name and device-key path. Click a field or press Enter to edit; Ctrl+S saves.
+2. Open **Sessions** with `2` or click its tab. Use arrow keys and Space, or click
+   a row, to select an existing running named session.
+3. Choose **Start sharing** or press `s`. The header shows connection status and
+   refreshes automatically without interrupting form edits.
 
 A named session includes all its workspaces, panes and agents. Registered Hive
 members receive full control of what you publish. Closing the settings pane does

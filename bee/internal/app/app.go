@@ -46,12 +46,12 @@ func (a App) Execute(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "help", "--help", "-h":
-		fmt.Fprintln(a.Out, `bee configure --hive HOST:PORT --identity PATH --known-hosts PATH
+		fmt.Fprintln(a.Out, `bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH]
 bee name [NAME]
 bee sessions
 bee share SESSION
 bee unshare SESSION
-bee enable | disable | status | tui
+bee enable | disable | status | tui | open
 bee update
 bee run | restore
 All noninteractive command results are JSON. Sharing grants full access to the selected named session to registered Hive members.`)
@@ -61,6 +61,15 @@ All noninteractive command results are JSON. Sharing grants full access to the s
 			return errors.New("usage: bee update")
 		}
 		return a.update(ctx)
+	case "open":
+		if len(args) != 1 {
+			return errors.New("usage: bee open")
+		}
+		action, err := herdr.OpenSettings(ctx, a.Dir)
+		if err != nil {
+			return err
+		}
+		return a.emit(map[string]string{"panel": action})
 	case "tui":
 		return a.TUI(ctx)
 	case "run":
@@ -79,12 +88,12 @@ All noninteractive command results are JSON. Sharing grants full access to the s
 		f.SetOutput(a.Out)
 		h := f.String("hive", "", "Hive SSH host:port")
 		id := f.String("identity", "", "SSH identity file")
-		kh := f.String("known-hosts", "", "verified known_hosts file")
+		kh := f.String("known-hosts", "", "known_hosts override (default: existing setting or ~/.ssh/known_hosts)")
 		if e := f.Parse(args[1:]); e != nil {
 			return e
 		}
-		if f.NArg() != 0 || *h == "" || *id == "" || *kh == "" {
-			return errors.New("configure requires --hive, --identity and --known-hosts")
+		if f.NArg() != 0 || *h == "" || *id == "" {
+			return errors.New("configure requires --hive and --identity")
 		}
 		if _, _, e := net.SplitHostPort(*h); e != nil {
 			return e
@@ -93,16 +102,22 @@ All noninteractive command results are JSON. Sharing grants full access to the s
 		if e != nil {
 			return e
 		}
-		kp, e := filepath.Abs(*kh)
-		if e != nil {
+		if _, e = os.Stat(ip); e != nil {
 			return e
 		}
-		for _, p := range []string{ip, kp} {
-			if _, e = os.Stat(p); e != nil {
-				return e
+		return a.change(func(c *config.Config) error {
+			kp, err := knownHostsPath(*kh, c.KnownHosts)
+			if err != nil {
+				return err
 			}
-		}
-		return a.change(func(c *config.Config) error { c.Hive = *h; c.IdentityFile = ip; c.KnownHosts = kp; return nil })
+			if _, err = os.Stat(kp); err != nil {
+				return err
+			}
+			c.Hive = *h
+			c.IdentityFile = ip
+			c.KnownHosts = kp
+			return nil
+		})
 	case "name":
 		if len(args) == 1 {
 			c, e := config.Load(a.Dir)
@@ -274,4 +289,19 @@ func (a App) executable() (string, error) {
 		return a.Executable, nil
 	}
 	return os.Executable()
+}
+
+// Omitted overrides preserve an existing trust store, including CLI-managed paths.
+func knownHostsPath(requested, current string) (string, error) {
+	if requested != "" {
+		return filepath.Abs(requested)
+	}
+	if current != "" {
+		return current, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".ssh", "known_hosts"), nil
 }

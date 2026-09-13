@@ -13,7 +13,7 @@ Install the newest stable release and register the plugin automatically:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
-herdr plugin pane open --plugin herdr.bee --entrypoint settings
+herdr plugin action invoke configure --plugin herdr.bee
 ```
 
 The shell installer detects your OS and architecture and verifies the download.
@@ -59,15 +59,56 @@ continues retrying. Use `status` to distinguish saved intent from live connectiv
 changing share IDs. One device identity should belong to one Bee instance; a
 second concurrent publisher using that identity is rejected.
 
+## Panel controls
+
+Bee opens beside the current pane. Open the action again to focus the existing
+Bee pane in this tab; invoke it from that pane to close it. Closing the UI leaves
+sharing running. Add this binding to Herdr's `config.toml`, then run
+`herdr server reload-config`:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+b"
+type = "plugin_action"
+command = "herdr.bee.configure"
+description = "Open Bee"
+```
+
+| Input | Action |
+| --- | --- |
+| `1` / `2`, Left / Right | Connection / Sessions |
+| Tab / Shift+Tab, Up / Down | Move between fields or sessions |
+| Enter, click | Edit a field or activate a control |
+| Space, click a session | Share or unshare that session |
+| Ctrl+S | Save edited connection fields |
+| `s` | Start or pause sharing |
+| `u` | Update Bee |
+| `r` | Refresh now |
+| `q` / Escape | Close the pane (Escape first leaves an edited field) |
+
+Text fields support normal editing and bracketed paste. Shortcuts such as `s`
+and `q` remain text while editing. The UI refreshes after actions and every two
+seconds when idle, with one snapshot request in flight. Slow responses do not
+block input; an error is shown without discarding drafts. Untouched fields pick
+up CLI changes while edited fields stay local until saved. Small panes scroll
+focused controls into view, and colors follow the terminal's light/dark theme.
+
+Host verification uses `~/.ssh/known_hosts` by default. Existing custom trust-store
+paths are preserved; `bee configure --known-hosts PATH` remains available as a CLI
+override. The standard panel does not expose this SSH setting.
+
+The UI uses Bubble Tea's state-driven model and Lip Gloss styling, compiled into
+the existing Go binary. No browser, Node runtime or local web server is required.
+
 ## TUI and CLI parity
 
 | Terminal UI | CLI |
 | --- | --- |
-| Configure Hive | `bee configure --hive … --identity … --known-hosts …` |
-| Change visible name | `bee name NAME` |
-| Select or remove sessions | `bee sessions`, `bee share NAME`, `bee unshare NAME` |
-| Toggle all sharing | `bee enable`, `bee disable` |
-| Connection details / refresh | `bee status` |
+| Connection: Hive and SSH fields | `bee configure --hive … --identity … --known-hosts …` |
+| Connection: visible name | `bee name NAME` |
+| Sessions: select or remove | `bee sessions`, `bee share NAME`, `bee unshare NAME` |
+| Start / pause sharing | `bee enable`, `bee disable` |
+| Live connection status / refresh | `bee status` |
 | Update Bee | `bee update` |
 
 The Herdr actions `configure`, `enable` and `disable` are fixed entrypoints:

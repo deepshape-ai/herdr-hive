@@ -10,6 +10,7 @@ make package
 python3 -m venv .local/venv
 .local/venv/bin/pip install -r tests/integration/requirements.txt
 .local/venv/bin/python tests/integration/native.py
+python3 tests/integration/panel.py
 ```
 
 Requires Herdr 0.9.0 and OpenSSH. The native test covers three local publishers,
@@ -37,6 +38,13 @@ supplied via `HIVE_TEST_CONTROL`. Never add test credentials or real host names 
 this repository. The script installs all three binaries in a new remote temporary
 directory, starts isolated sessions, verifies native access in both directions,
 self-share exclusion, stable reconnection after Hive restart, and cleans up.
+
+The separate `panel.py` test creates an isolated local Herdr server and Bee plugin
+under `.local/panel-native`. It checks native split/open/focus/close/reopen,
+automatic refresh after CLI edits, and keyboard navigation, then removes its
+processes and files. It requires only Python's standard library, Go and Herdr.
+`go -C bee test ./internal/app` also covers stale mouse targets, draft merging,
+paste handling and light/dark layouts at normal and compact terminal sizes.
 
 Latency samples measure input to a reconstructed ANSI terminal screen; this is
 not physical display latency. Keep real host addresses, keys and raw terminal

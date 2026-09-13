@@ -45,7 +45,7 @@ cd "$HOME/.local/share/herdr-hive"
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
-herdr plugin pane open --plugin herdr.bee --entrypoint settings
+herdr plugin action invoke configure --plugin herdr.bee
 ```
 
 安装位置为 `~/.local/share/herdr-bee`，脚本会自动将插件注册到 Herdr 并启用。可执行文件保留在插件目录，无需全局 `bee` 命令或修改 PATH。
@@ -61,12 +61,11 @@ ssh-add "$HOME/.ssh/hive_device"
 
 把 `hive_device.pub` 交给 Hive 管理员。获取 Hive 的主机公钥，与管理员提供的指纹核对后加入 `known_hosts` 文件。`ssh-keyscan -p 2222 hive.example.internal` 可以获取候选公钥，但扫描本身不能验证服务器身份。
 
-在 Bee 设置面板中依次操作：
+Bee 会打开独立的分栏 pane。同一操作会聚焦当前 tab 已有的面板；在面板内再次触发则关闭。添加[快捷键配置](bee/README.md#panel-controls)后，可用 `prefix+alt+b` 操作。
 
-1. **Configure Hive**：填写 `hive.example.internal:2222`、`hive_device` 的绝对路径和已验证的 `known_hosts` 文件绝对路径。
-2. **Change visible name**：保留默认主机名，或设置自己的可见名称。
-3. **Select shared sessions**：选择已存在且正在运行的 Herdr named session。
-4. **Toggle all sharing**：开启共享，确认 `Connected` 为 true。
+1. 在 **Connection** 中填写 Hive 地址、可见名称和设备密钥路径。点击字段或按 Enter 编辑，Ctrl+S 保存。
+2. 按 `2` 或点击 **Sessions** 标签，使用方向键和空格，或点击列表，选择已存在且正在运行的 named session。
+3. 选择 **Start sharing** 或按 `s` 开启共享。顶部状态自动刷新，不会打断表单输入。
 
 共享范围包含该 named session 内的全部 workspace、pane 和 agent，已注册的 Hive 成员拥有完整控制权。关闭设置面板不会停止共享。[插件自带的 CLI](bee/README.md#first-publication) 提供相同能力，脚本和 agent 可以通过插件目录下的完整路径调用。
 
