@@ -42,6 +42,25 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./...
+      - name: Verify marketplace build and entrypoints
+        if: matrix.component == 'bee'
+        working-directory: bee/plugin
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, tomllib
+          path = pathlib.Path('herdr-plugin.toml')
+          original = path.read_bytes()
+          manifest = tomllib.loads(original.decode())
+          for entry in manifest['build']:
+              subprocess.run(entry['command'], check=True)
+          assert path.read_bytes() == original, 'build modified the manifest'
+          version = subprocess.check_output(['./bee', 'version'], text=True).strip()
+          assert version == manifest['version'], (version, manifest['version'])
+          for section in ('startup', 'actions', 'panes'):
+              for entry in manifest[section]:
+                  assert os.access(entry['command'][0], os.X_OK), entry
+          print('Marketplace build, version and executable entrypoints verified')
+          PY
   native:
     needs: test
     runs-on: ubuntu-latest

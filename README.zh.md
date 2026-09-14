@@ -46,6 +46,16 @@ curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/instal
 
 Bee 安装到 `~/.local/share/herdr-bee`，并自动注册到 Herdr。下面使用可执行文件的完整路径，无需修改 PATH。
 
+也可以通过 Herdr 的 GitHub 安装器从源码安装（需要 Git 和 Go **1.27.1+**）：
+
+```sh
+herdr plugin install deepshape-ai/herdr-hive/bee/plugin
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+采用此托管安装方式时，在第 3 步准备好密钥和主机公钥条目后，通过 Bee 面板完成连接配置。
+更新与卸载见[插件安装指南](bee/plugin/README.md)。
+
 ### 3. 使用 token 注册
 
 如果还没有专用设备密钥，先创建：

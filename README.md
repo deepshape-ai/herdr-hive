@@ -55,6 +55,18 @@ curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/instal
 Bee is installed into `~/.local/share/herdr-bee` and linked to Herdr automatically.
 The commands below use its full path; no PATH changes are needed.
 
+Alternatively, install from source with Herdr's GitHub installer (Git and Go
+**1.27.1+** required):
+
+```sh
+herdr plugin install deepshape-ai/herdr-hive/bee/plugin
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+For this managed installation, use the Bee panel to configure the connection
+after preparing the key and host entry in step 3. See the
+[plugin installation guide](bee/plugin/README.md) for updates and removal.
+
 ### 3. Register with a token
 
 First create a dedicated device key, unless you already have one:

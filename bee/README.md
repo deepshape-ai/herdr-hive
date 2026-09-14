@@ -6,6 +6,13 @@ and switch sharing on or off. Its TUI and CLI call the same application logic.
 
 ## Install
 
+For Herdr's GitHub-managed installation, including build requirements and
+reinstallation, see the [plugin installation guide](plugin/README.md):
+
+```sh
+herdr plugin install deepshape-ai/herdr-hive/bee/plugin
+```
+
 For download, checksum and first-run commands, start with the
 [Bee Quickstart](../README.md#2-install-bee-inside-herdr).
 
