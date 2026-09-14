@@ -222,3 +222,28 @@ selected session currently keeps publication pending until it is available or
 removed from selection. Configuration changes restart the publication transport
 and disconnect viewers. This simple first-version behavior avoids partial stale
 publication state.
+
+## Shared terminal sizing
+
+Bee keeps terminal sizes stable while remote viewers have a tab open. The first
+remote view pins each pane's current PTY rows and columns; later viewers reuse
+those dimensions. Local and remote users retain input access. Background session
+discovery does not pin sizes. Leaving a tab, hiding the remote session, disconnecting
+or disabling sharing releases that viewer's references; the last viewer leaving
+restores Herdr's normal sizing. Herdr and Hive need no upgrade for this feature.
+
+A smaller viewing window can crop content, including a prompt near the bottom;
+a larger window can leave unused space. Enlarge the viewing window to see the
+fixed grid. Split and zoom operations retain existing terminal sizes while shared;
+new panes are pinned when their snapshot arrives. This prevents resize-driven
+reflow, not conflicting simultaneous input or application-generated redraws.
+
+The publisher uses the installed Herdr `terminal session control` CLI without
+`--takeover`, one helper per pinned terminal, at most 32 across the Bee process.
+It reads PTY geometry through the local process ID, `ps`, and a read-only terminal
+ioctl, and drains helper frames without retaining terminal history. The published
+session's API and client sockets must both remain available. An existing direct
+terminal controller is never displaced: a conflicting remote view disconnects
+and Bee logs the reason. After the controller is released, reconnect the view.
+A live pane losing its sizing helper also disconnects affected viewers; ordinary
+pane closure releases that pane without ending the rest of the session.

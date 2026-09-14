@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -230,7 +231,10 @@ func handle(ctx context.Context, n ssh.NewChannel, b herdr.Bound, kind string) {
 			go ssh.DiscardRequests(reqs)
 			return
 		}
-		copyLocal(ctx, ch, reqs, local)
+		go func() { ssh.DiscardRequests(reqs); local.Close() }()
+		if err := b.Relay(ctx, ch, local); err != nil && ctx.Err() == nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			slog.Warn("shared session disconnected", "reason", err)
+		}
 
 		return
 	}
@@ -250,23 +254,4 @@ func handle(ctx context.Context, n ssh.NewChannel, b herdr.Bound, kind string) {
 	defer ch.Close()
 	go ssh.DiscardRequests(reqs)
 	ch.Write(data)
-}
-
-func copyLocal(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.Request, local net.Conn) {
-	stop := context.AfterFunc(ctx, func() { local.Close() })
-	defer stop()
-	go func() { ssh.DiscardRequests(reqs); local.Close() }()
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(local, ch)
-		if u, ok := local.(*net.UnixConn); ok {
-			u.CloseWrite()
-		}
-		done <- struct{}{}
-	}()
-	go func() { io.Copy(ch, local); ch.CloseWrite(); done <- struct{}{} }()
-	<-done
-	local.Close()
-	ch.Close()
-	<-done
 }

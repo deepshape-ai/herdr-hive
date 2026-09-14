@@ -65,7 +65,9 @@ Different keys represent different devices even when they share an IP or hostnam
    A `User s-…` alias optionally selects one share; no remote session override is used.
 6. Hive recognizes supported native bootstrap requests and maps them to fixed Bee
    operations. Bee returns live Herdr status or opens the selected client socket.
-7. Direct-sharing streams pass through unchanged. The aggregate endpoint decodes
+7. Bee inspects native hello, navigation, response and snapshot frames to pin
+   viewed PTYs through Herdr terminal controllers. Other frames stream unchanged.
+   The aggregate endpoint decodes
    the frozen generation-1 codecs, namespaces resources, routes operations and
    retains bounded complete surfaces for switching. Neither path records terminals.
 8. Closing a consumer attachment closes its streams. Disabling publication closes
@@ -84,8 +86,9 @@ reconnect the entire Bee publication, favoring simple ownership over partial upd
 
 The integration target verified in this implementation is Herdr 0.9.0. Native
 bootstrap scripts are identified by exact requests or known discovery hashes.
-Unknown scripts are rejected, never executed. Direct-sharing payloads pass through
-unchanged. The aggregate codec and limits are specified in protocol/v1.md and
+Unknown scripts are rejected, never executed. Bee stages shell activation and
+uses private surface barriers while forwarding native terminal input and output.
+The aggregate codec and limits are specified in protocol/v1.md and
 hive/README.md; unsupported aggregate operations remain available by direct sharing ID.
 
 | Operation | Implementation / guarantee |
@@ -94,7 +97,7 @@ hive/README.md; unsupported aggregate operations remain available by direct shar
 | Terminal input and text paste | Native client protocol; duplex input/output tested |
 | Interactive agent questions and approvals | Same terminal input path and full session authority; no separate approval ACL |
 | Workspace/tab/pane management | Native server semantics; all objects inside selected session are accessible |
-| Resize, scrollback and copy | Native behavior; aggregate IDs and surfaces are translated |
+| Resize, scrollback and copy | Bee pins viewed PTY sizes; scroll/copy stay native, aggregate IDs and surfaces are translated |
 | Concurrent consumers / local owner input | Native Herdr concurrency semantics; no additional single-writer lease |
 | Agent state | Native Herdr events and detection; no proxy-pane metadata impersonation |
 | Images, terminal extensions, files | Whatever the supported Herdr native transport implements; not independently certified here. Hive does not add SFTP/SCP |
@@ -114,6 +117,11 @@ payload changes need no relay rewrite; arbitrary future versions are not promise
 [Hive's resource envelope](../hive/README.md#resource-envelope) defines defaults,
 window capacity, persistent limits and OS-level protections. Connection and channel
 budgets are global, so adding consumers cannot create unbounded relay buffers.
+Bee additionally permits at most 32 sizing helper processes across published
+sessions. Each helper drains rendered frames (8 MiB record limit) and is released
+with its last viewer reference. Helpers add local process/rendering overhead; see
+[Bee sizing behavior and limitations](../bee/README.md#shared-terminal-sizing).
+
 Slow consumers backpressure the originating stream. Closing either side unblocks
 both copy directions and returns its capacity slot.
 

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -62,32 +61,4 @@ func TestHungSSHAgentIsCancelled(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("SSH agent ignored cancellation")
 	}
-}
-
-type pipeChannel struct{ net.Conn }
-
-func (c pipeChannel) CloseWrite() error                              { return nil }
-func (c pipeChannel) SendRequest(string, bool, []byte) (bool, error) { return false, nil }
-func (c pipeChannel) Stderr() io.ReadWriter                          { return c.Conn }
-func TestCancelledStreamClosesBlockedLocalIO(t *testing.T) {
-	local, herdr := net.Pipe()
-	defer herdr.Close()
-	ch, peer := net.Pipe()
-	defer peer.Close()
-	reqs := make(chan *ssh.Request)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go func() { defer close(done); copyLocal(ctx, pipeChannel{ch}, reqs, local) }()
-	written := make(chan struct{})
-	go func() { peer.Write([]byte("input")); close(written) }()
-	<-written
-	// copyLocal has read input and is now blocked writing the nonreading Herdr peer.
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("cancel did not close blocked local I/O")
-	}
-	close(reqs)
 }

@@ -16,6 +16,12 @@ python3 tests/integration/panel.py
 Requires Herdr 0.9.0 and OpenSSH. The native test covers three local publishers,
 real native `machine add`, real terminal input/output, name collisions, shell and
 unshared-target rejection, and sharing shutdown without agent termination.
+The test also measures actual PTY sizes with a publisher-local shell and two
+remote viewers: fixed sizes across focus/input/resize, independent tabs, remote
+tab switches, pane closure, last-viewer release and existing-controller conflicts.
+`BEE_NATIVE_TEST_BINARY=/absolute/path/to/bee` substitutes an installed Bee binary
+for the publisher under test, while retaining disposable sessions and identities.
+
 An isolated OpenSSH config wrapper only redirects config lookup; it does not
 replace Herdr, its protocol, or the SSH executable.
 

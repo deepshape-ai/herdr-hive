@@ -23,6 +23,7 @@ type Bound struct {
 	Session
 	clientPath          string
 	apiInfo, clientInfo os.FileInfo
+	sizing              *Sizing
 }
 
 func binary() string {
@@ -83,6 +84,7 @@ func Bind(s Session) (Bound, error) {
 	if b.apiInfo.Mode()&os.ModeSocket == 0 || b.clientInfo.Mode()&os.ModeSocket == 0 {
 		return b, errors.New("Herdr endpoints must be Unix sockets")
 	}
+	b.sizing = &Sizing{bound: b, locks: map[string]*sizeLock{}}
 	return b, nil
 }
 func (b Bound) Check() error {

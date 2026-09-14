@@ -171,16 +171,16 @@ def verify_dimensions(sshbase, shares, api, paths, root):
         assert 'error' not in request('show', 'client_shell.surface.set', {'active': True})
         assert 'error' not in request('barrier-a', 'workspace.focus', {'workspace_id': workspaces['a']['workspace_id']})
         a_sizes = sizes()
-        assert a_sizes['a'] != baseline['a'], ('active source did not resize', a_sizes)
+        assert a_sizes == baseline, ('activation changed pinned PTYs', a_sizes, baseline)
         assert all(a_sizes[x] == baseline[x] for x in 'bc'), ('activation resized a hidden source', a_sizes)
         w.send(b'\x0c' + number(8) + number(16) + number(80) + number(24) + b'\x00')
         assert 'error' not in request('resize-a', 'workspace.focus', {'workspace_id': workspaces['a']['workspace_id']})
         resized = sizes()
-        assert resized['a'] != a_sizes['a'], ('active resize lost', resized)
+        assert resized == a_sizes, ('active viewer resized pinned PTYs', resized, a_sizes)
         assert all(resized[x] == baseline[x] for x in 'bc'), ('resize broadcast', resized)
         assert 'error' not in request('select-b', 'workspace.focus', {'workspace_id': workspaces['b']['workspace_id']})
         b_sizes = sizes()
-        assert b_sizes['b'] == resized['a'], ('new source missed cached size', b_sizes, resized)
+        assert b_sizes['b'] == baseline['b'], ('new source lost original PTY size', b_sizes, baseline)
         assert b_sizes['c'] == baseline['c']
         other = Wire([str(a) for a in sshbase] + ['hive@127.0.0.1', 'exec /herdr remote-client-bridge'])
         try:
@@ -200,3 +200,141 @@ def verify_dimensions(sshbase, shares, api, paths, root):
         print('PTY size isolation verified:', json.dumps({'baseline': baseline, 'active_a': a_sizes, 'resized_a': resized, 'active_b': b_sizes}), flush=True)
     finally:
         w.close()
+
+
+class SocketWire(Wire):
+    """A real publisher-local shell connection, bypassing Bee and Hive."""
+    def __init__(self, path):
+        import socket
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.socket.settimeout(10)
+        self.socket.connect(str(path).replace('.sock', '-client.sock'))
+        self.snapshot = self.surface = None
+
+    def send(self, p):
+        self.socket.sendall(struct.pack('<I', len(p)) + p)
+
+    def read(self, deadline):
+        self.socket.settimeout(max(.01, deadline-time.monotonic()))
+        def exact(n):
+            out = b''
+            while len(out) < n:
+                part = self.socket.recv(n-len(out))
+                assert part, 'local Herdr disconnected'
+                out += part
+            return out
+        n = struct.unpack('<I', exact(4))[0]
+        return exact(n)
+
+    def close(self):
+        self.socket.close()
+
+
+def verify_shared_sizing(sshbase, shares, api, paths, root):
+    """Independent PTY oracle: local owner + two remote clients, two tabs."""
+    path = paths['a']
+    local = SocketWire(path)
+    remotes = []
+    seq = 0
+    def resize(w, cols, rows):
+        w.send(b'\x0c'+number(8)+number(16)+number(cols)+number(rows)+b'\x00')
+    def focus(w, tab=None):
+        nonlocal seq
+        seq += 1
+        reply = w.request('sizing-'+str(seq), 'tab.focus', {'tab_id': tab or w.snapshot['focused_tab_id']})
+        assert 'error' not in reply, reply
+        if tab and w.snapshot['focused_tab_id'] != tab:
+            w.until(lambda tag,v: tag==20 and v.get('focused_tab_id')==tab)
+    def size(pane='w1:p1'):
+        nonlocal seq
+        seq += 1
+        output = root/'a'/('shared-size-'+str(seq))
+        api(path, 'pane.send_text', {'pane_id':pane,'text':'stty size > '+str(output)+'\r'})
+        end = time.monotonic()+5
+        while not output.exists() or not output.read_text().strip():
+            assert time.monotonic()<end, 'PTY oracle timed out'
+            time.sleep(.03)
+        return output.read_text().strip()
+    def open_remote():
+        w=Wire([str(a) for a in sshbase]+[shares['a']['id']+'@127.0.0.1','exec /herdr remote-client-bridge'])
+        remotes.append(w)
+        w.hello();w.until(lambda tag,v:tag==20 and v.get('focused_tab_id'))
+        return w
+    try:
+        local.hello();local.until(lambda tag,v:tag==20 and v.get('focused_tab_id'))
+        first_tab=local.snapshot['focused_tab_id']
+        resize(local,110,34);focus(local,first_tab)
+        baseline=size()
+        first=open_remote();resize(first,65,19);focus(first,first_tab)
+        second=open_remote();resize(second,145,45);focus(second,first_tab)
+        assert size()==baseline, 'remote arrival changed PTY size'
+        for i in range(3):
+            for w,cols,rows in [(local,115+i,36+i),(first,70+i,20+i),(second,150+i,46+i)]:
+                resize(w,cols,rows);focus(w,first_tab)
+                assert size()==baseline, 'concurrent focus/resize changed pinned PTY'
+        # Both local and remote input still reaches the original process.
+        for w,marker in [(local,'LOCAL_SIZING_INPUT'),(first,'REMOTE_SIZING_INPUT')]:
+            w.send(b'\x0d'+text('w1:p1')+number(1)+b'\x01'+text("printf '"+marker+"\\n'\r"))
+            focus(w,first_tab)
+            assert marker in str(api(path,'pane.read',{'pane_id':'w1:p1','format':'text','source':'visible'}))
+        first.close();remotes.remove(first);time.sleep(.2)
+        resize(local,123,38);focus(local,first_tab)
+        assert size()==baseline, 'first departure released another viewer lock'
+        # Local work in another tab still follows local geometry.
+        created=api(path,'tab.create',{'workspace_id':'w1','label':'independent','focus':False})
+        tab2=created['tab']['tab_id'];pane2=created['root_pane']['pane_id']
+        focus(local,tab2);resize(local,95,29);focus(local,tab2)
+        independent=size(pane2)
+        resize(local,105,33);focus(local,tab2)
+        assert size(pane2)!=independent, 'unshared tab was pinned'
+        assert size()==baseline, 'other tab disturbed pinned terminal'
+        # Remote navigation pins the destination before Herdr applies its size.
+        destination = size(pane2)
+        focus(second,tab2)
+        resize(local,120,37);focus(local,tab2)
+        resize(second,155,47);focus(second,tab2)
+        assert size(pane2)==destination, 'remote tab navigation failed to pin destination'
+        focus(second,first_tab)
+        resize(local,100,31);focus(local,tab2)
+        assert size(pane2)!=destination, 'departed remote tab stayed pinned'
+        # A pane created/closed while the Tab is shared must not kill the viewer.
+        split=second.request('split-live','pane.split',{'target_pane_id':'w1:p1','direction':'right'})
+        assert 'error' not in split, split
+        split_pane=split['result']['pane']['pane_id']
+        if not any(p['pane_id']==split_pane for p in second.snapshot['panes']):
+            second.until(lambda tag,v:tag==20 and any(p['pane_id']==split_pane for p in v.get('panes',[])))
+        api(path,'pane.close',{'pane_id':split_pane})
+        focus(second,first_tab)
+        if any(p['pane_id']==split_pane for p in second.snapshot['panes']):
+            second.until(lambda tag,v:tag==20 and all(p['pane_id']!=split_pane for p in v.get('panes',[])))
+        focus(second,first_tab)
+        # Last viewer leaves: native local sizing resumes without restarting panes.
+        second.close();remotes.remove(second);time.sleep(.3)
+        focus(local,first_tab);resize(local,125,39);focus(local,first_tab)
+        assert size()!=baseline, 'last departure did not restore native sizing'
+        api(path,'tab.close',{'tab_id':tab2})
+        controller=SocketWire(path)
+        try:
+            controller.send(b'\x00'+number(22)+number(80)+number(24)+number(0)+number(0)+b'\x00')
+            assert controller.read(time.monotonic()+5)[0]==0
+            controller.send(b'\x08'+text('w1:p1')+b'\x00')
+            while True:
+                frame=controller.read(time.monotonic()+5)
+                if frame[0]==1: break
+                assert frame[0]!=3, ('direct controller rejected',frame)
+            protected=size()
+            rejected=Wire([str(a) for a in sshbase]+[shares['a']['id']+'@127.0.0.1','exec /herdr remote-client-bridge'])
+            try:
+                rejected.hello()
+                try:
+                    rejected.until(lambda tag,v:tag==13,timeout=5)
+                    raise AssertionError('competing direct controller was accepted')
+                except AssertionError as error:
+                    assert 'gateway closed' in str(error), error
+            finally:rejected.close()
+            assert size()==protected, 'existing direct controller was stolen'
+        finally:controller.close()
+        print('Shared PTY sizing verified: local owner, two remote viewers, input, independent tab, release',flush=True)
+    finally:
+        for w in remotes:w.close()
+        local.close()

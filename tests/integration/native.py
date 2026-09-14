@@ -60,6 +60,8 @@ def main():
     for component in ('hive','bee'):
         run(['go','-C',ROOT/component,'build','-ldflags','-X main.version=0.0.1',
              '-o',install/component,'./cmd/'+component],timeout=90)
+    if os.environ.get('BEE_NATIVE_TEST_BINARY'):
+        shutil.copy2(os.environ['BEE_NATIVE_TEST_BINARY'], install/'bee')
     for who in ['hive', 'a', 'b', 'c', 'd', 'consumer']:
         (R / who).mkdir(mode=0o700)
     for who in ['a', 'b', 'c', 'd', 'consumer']:
@@ -134,9 +136,11 @@ def main():
     wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];out=[]\nwhile a:\n x=a.pop(0)\n if x in ("-F","-S"): a.pop(0)\n else: out.append(x)\nos.execv("/usr/bin/ssh",["ssh","-F",'+repr(str(sshconfig))+']+out)\n');wrapper.chmod(0o700)
     consumer_env=dict(BASE,XDG_CONFIG_HOME=str(R/'consumer'),XDG_STATE_HOME=str(R/'consumer/state'),PATH=str(bindir)+os.pathsep+BASE['PATH'],TERM='xterm-256color')
     conf=R/'consumer/herdr';conf.mkdir();(conf/'config.toml').write_text('onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n')
-    from gateway import verify, verify_visibility, verify_dimensions
+    from gateway import verify, verify_visibility, verify_dimensions, verify_shared_sizing
     verify_dimensions(sshbase, shares, api, {who:R/who/'herdr/herdr.sock' for who in 'abc'}, R)
     result['gateway_background_and_active_pty_size_isolation']=True
+    verify_shared_sizing(sshbase, shares, api, {who:R/who/'herdr/herdr.sock' for who in 'abc'}, R)
+    result['shared_pty_sizing_local_and_two_remotes']=True
     verify(sshbase,shares,api,{who:R/who/'herdr/herdr.sock' for who in 'abc'},
            lambda who,enabled:run([ROOT/'dist/bee','enable' if enabled else 'disable'],envs[who]))
     own=list(sshbase);own[own.index('-i')+1]=str(R/'a/key')
@@ -157,8 +161,10 @@ def main():
     listed=json.loads(run([BIN,'machine','list','--json'],consumer_env).stdout)
     assert listed[0]['label']=='Worker B'
     # A native remote TUI sends actual terminal input and receives output through Hive.
+    # Use a viewport containing the pinned source grid; small windows deliberately
+    # crop it and are covered by the independent PTY sizing tests above.
     for who in 'abc':
-        p=pexpect.spawn(BIN,['--remote','shared-'+who],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(30,120))
+        p=pexpect.spawn(BIN,['--remote','shared-'+who],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(50,170))
         terminals.append(p)
         p.expect('HOST_'+who)
         time.sleep(.4)
@@ -210,7 +216,7 @@ def main():
         return state.get('connected') and state.get('version')==expected and state.get('pid')==before_bee['pid'] and state['shares'][0]['id']==shares['c']['id']
     wait(bee_restarted,20)
     assert api(R/'a/herdr/herdr.sock','session.snapshot')
-    p=pexpect.spawn(BIN,['--remote','shared-c'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(30,120));terminals.append(p)
+    p=pexpect.spawn(BIN,['--remote','shared-c'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(50,170));terminals.append(p)
     p.expect('HOST_c');time.sleep(.4)
     p.send("printf '\\125\\120\\107\\122\\101\\104\\105_OK\\n'\r")
     p.expect('UPGRADE_OK')

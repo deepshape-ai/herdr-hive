@@ -167,9 +167,10 @@ creation and management, selection/copy, scroll and split geometry to the owning
 session. Moving objects between different shared sessions, global workspace
 reordering, worktree operations and remote installation/configuration operations
 are not offered by the aggregate endpoint. Operations involving IDs from multiple
-sessions are rejected. Shared sessions retain native Herdr concurrency semantics.
+sessions are rejected. Shared sessions retain native Herdr input semantics;
+[updated Bee publishers](../bee/README.md#shared-terminal-sizing) pin PTY dimensions while viewed.
 
-For a transparent connection to one session, `ssh hive 'list --json'` still returns
+For a connection to one session, `ssh hive 'list --json'` still returns
 the directory. Create another alias with `User s-…` from that response and run
 `herdr machine add <alias>`. This direct path preserves the full upstream native
 protocol. Omit `--remote-session` in both modes.
@@ -242,9 +243,9 @@ available. These limits are independent of the existing SSH/channel budgets.
 Background connections subscribe to session metadata without taking terminal
 size control. Only the shared session currently visible in the viewer receives
 window resizes; switching away releases its surface interest. This requires no
-extra configuration or changes to Herdr or Bee. Actively viewing the same
-terminal from multiple devices still follows Herdr's shared terminal sizing
-rules. Direct sharing-ID connections follow Herdr's native attach behavior.
+extra configuration or changes to Herdr. Bee's shared-terminal sizing support
+pins viewed terminals on the publisher, including direct sharing-ID connections.
+Older Bee publishers still follow Herdr's native shared sizing rules.
 
 Each upstream snapshot is at most 256 KiB. Native frames, retained complete
 surfaces (including live image assets), and incomplete response data per source
