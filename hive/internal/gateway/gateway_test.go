@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 type memoryStream struct{ bytes.Buffer }
@@ -154,7 +155,7 @@ func TestGraphicsSurviveIncrementalAssetElision(t *testing.T) {
 	}
 }
 func testSession() *session {
-	return &session{out: &memoryStream{}, sources: map[string]*backend{}, pending: map[string]*backend{}, catalog: func() []Source { return nil }, boot: "hive", cancel: func() {}}
+	return &session{out: &memoryStream{}, sources: map[string]*backend{}, pending: map[string]*backend{}, deadlines: map[string]time.Time{}, catalog: func() []Source { return nil }, boot: "hive", cancel: func() {}}
 }
 func responseFrame(boot, id string) []byte {
 	b := append([]byte{18}, str(boot)...)

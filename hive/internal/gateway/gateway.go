@@ -25,16 +25,17 @@ type Source struct {
 type Catalog func() []Source
 
 type backend struct {
-	effects      map[uint64][]byte
-	welcomed     bool
-	source       Source
-	stream       io.ReadWriteCloser
-	boot, prefix string
-	snapshot     map[string]any
-	methods      map[string]bool
-	frame        completeSurface
-	chunks       map[string][]byte
-	cancel       context.CancelFunc
+	effects       map[uint64][]byte
+	welcomed      bool
+	surfaceActive bool
+	source        Source
+	stream        io.ReadWriteCloser
+	boot, prefix  string
+	snapshot      map[string]any
+	methods       map[string]bool
+	frame         completeSurface
+	chunks        map[string][]byte
+	cancel        context.CancelFunc
 }
 type event struct {
 	stream io.ReadWriteCloser
@@ -43,27 +44,28 @@ type event struct {
 	err    error
 }
 type session struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	out             io.ReadWriteCloser
-	catalog         Catalog
-	events          chan event
-	sources         map[string]*backend
-	active          *backend
-	boot            string
-	revision        uint64
-	hello           []byte
-	welcome         bool
-	resize          []byte
-	surfaceActive   bool
-	surfaceRevision uint64
-	pending         map[string]*backend
-	fence           string
-	fencePending    bool
-	fenceSource     *backend
-	fenceUntil      time.Time
-	deadlines       map[string]time.Time
-	cols, rows      uint64
+	ctx              context.Context
+	cancel           context.CancelFunc
+	out              io.ReadWriteCloser
+	catalog          Catalog
+	events           chan event
+	sources          map[string]*backend
+	active           *backend
+	boot             string
+	revision         uint64
+	hello            []byte
+	welcome          bool
+	resize           []byte
+	surfaceActive    bool
+	surfaceRevision  uint64
+	interestSequence uint64
+	pending          map[string]*backend
+	fence            string
+	fencePending     bool
+	fenceSource      *backend
+	fenceUntil       time.Time
+	deadlines        map[string]time.Time
+	cols, rows       uint64
 }
 
 // Serve presents the visible Bee sessions as one stable Herdr endpoint. All
@@ -120,7 +122,17 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 			return errWire
 		}
 		h["direct_graphics"] = false
-		h["surface_active"] = true
+		// Background subscriptions must not acquire publisher layout authority.
+		h["surface_active"] = false
+		g.resize = append(number(12), number(uint64(numberVal(h["cell_width_px"])))...)
+		g.resize = append(g.resize, number(uint64(numberVal(h["cell_height_px"])))...)
+		g.resize = append(g.resize, number(g.cols)...)
+		g.resize = append(g.resize, number(g.rows)...)
+		pixelMouse := byte(0)
+		if h["pixel_mouse"] == true {
+			pixelMouse = 1
+		}
+		g.resize = append(g.resize, pixelMouse)
 		p, _ := json.Marshal(h)
 		g.hello = control("endpoint.hello.v1", p)
 	case <-timer.C:
@@ -172,11 +184,6 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 			}
 			if ev.stream != nil {
 				b.stream = ev.stream
-				if len(g.resize) > 0 {
-					if e := g.send(b, g.resize); e != nil {
-						g.remove(b)
-					}
-				}
 				continue
 			}
 			if ev.data == nil {
@@ -212,7 +219,7 @@ func (g *session) remove(b *backend) {
 		if target == b {
 			delete(g.pending, id)
 			delete(g.deadlines, id)
-			if g.failure(id, "sharing disconnected") != nil {
+			if !internalInterest(id) && g.failure(id, "sharing disconnected") != nil {
 				g.cancel()
 			}
 		}
@@ -239,6 +246,13 @@ func (g *session) refresh() {
 			delete(g.pending, id)
 			delete(g.deadlines, id)
 			delete(b.chunks, id)
+			if internalInterest(id) {
+				g.remove(b)
+				if g.publish() != nil {
+					g.cancel()
+				}
+				continue
+			}
 			if g.failure(id, "sharing operation timed out") != nil {
 				g.cancel()
 			}
@@ -346,7 +360,7 @@ func transform(v any, f func(string) string) any {
 		return v
 	}
 }
-func (g *session) publish() error {
+func (g *session) snapshotIDs() []string {
 	ids := []string{}
 	for id, b := range g.sources {
 		if b.snapshot != nil {
@@ -354,12 +368,21 @@ func (g *session) publish() error {
 		}
 	}
 	sort.Strings(ids)
+	return ids
+}
+func (g *session) publish() error {
+	ids := g.snapshotIDs()
 	if g.active == nil && len(ids) > 0 {
 		g.active = g.sources[ids[0]]
 		if e := g.replayEffects(); e != nil {
 			return e
 		}
 	}
+	if e := g.syncInterest(); e != nil {
+		return e
+	}
+	// Writes can remove a failed source and publish its replacement.
+	ids = g.snapshotIDs()
 	out := emptySnapshot()
 	if g.active != nil {
 		out = object(transform(g.active.snapshot, func(id string) string { return g.active.prefix + id }))
@@ -549,6 +572,12 @@ func (g *session) server(b *backend, p []byte) error {
 		if json.Unmarshal([]byte(data), &v) != nil {
 			return errWire
 		}
+		if internalInterest(id) {
+			if object(v) == nil || object(v)["error"] != nil {
+				return errors.New("publisher rejected surface interest")
+			}
+			return nil
+		}
 		v = transform(v, func(id string) string { return b.prefix + id })
 		if obj := object(v); obj != nil {
 			obj["id"] = id
@@ -661,7 +690,7 @@ func (g *session) client(p []byte) error {
 			return errWire
 		}
 		id, method := stringVal(v["id"]), stringVal(v["method"])
-		if id == "" || len(id) > 128 {
+		if id == "" || len(id) > 128 || internalInterest(id) {
 			return errWire
 		}
 		if boot != g.boot {
@@ -727,16 +756,23 @@ func (g *session) client(p []byte) error {
 		out := append([]byte{15}, str(target.boot)...)
 		out = append(out, str(string(q))...)
 		return g.send(target, out)
-	case 12, 17, 19:
-		if tag == 12 {
-			d.nums(2)
-			g.cols = d.num()
-			g.rows = d.num()
-			if g.cols*g.rows > 65536 || d.err != nil {
-				return errWire
-			}
-			g.resize = append([]byte(nil), p...)
+	case 12:
+		d.nums(2)
+		cols, rows := d.num(), d.num()
+		pixelMouse := d.raw(1)
+		if len(pixelMouse) != 1 || pixelMouse[0] > 1 {
+			return errWire
 		}
+		if cols == 0 || rows == 0 || cols > 65536 || rows > 65536 || cols*rows > 65536 || d.err != nil || d.p != len(p) {
+			return errWire
+		}
+		g.cols, g.rows = cols, rows
+		g.resize = append([]byte(nil), p...)
+		if g.active != nil && g.surfaceActive {
+			return g.send(g.active, p)
+		}
+		return g.blankSurface()
+	case 17, 19:
 		for _, b := range g.sources {
 			if b.stream != nil {
 				if e := g.send(b, p); e != nil {

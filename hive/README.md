@@ -239,6 +239,13 @@ configuration notice explains the limit; the direct sharing-ID path remains
 available. These limits are independent of the existing SSH/channel budgets.
 `hive inspect --json` includes `gateway_viewers` and `max_gateway_viewers`.
 
+Background connections subscribe to session metadata without taking terminal
+size control. Only the shared session currently visible in the viewer receives
+window resizes; switching away releases its surface interest. This requires no
+extra configuration or changes to Herdr or Bee. Actively viewing the same
+terminal from multiple devices still follows Herdr's shared terminal sizing
+rules. Direct sharing-ID connections follow Herdr's native attach behavior.
+
 Each upstream snapshot is at most 256 KiB. Native frames, retained complete
 surfaces (including live image assets), and incomplete response data per source
 are each capped at 2 MiB; surfaces contain at most 65,536 cells. There are at most

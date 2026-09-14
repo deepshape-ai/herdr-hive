@@ -134,7 +134,9 @@ def main():
     wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];out=[]\nwhile a:\n x=a.pop(0)\n if x in ("-F","-S"): a.pop(0)\n else: out.append(x)\nos.execv("/usr/bin/ssh",["ssh","-F",'+repr(str(sshconfig))+']+out)\n');wrapper.chmod(0o700)
     consumer_env=dict(BASE,XDG_CONFIG_HOME=str(R/'consumer'),XDG_STATE_HOME=str(R/'consumer/state'),PATH=str(bindir)+os.pathsep+BASE['PATH'],TERM='xterm-256color')
     conf=R/'consumer/herdr';conf.mkdir();(conf/'config.toml').write_text('onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n')
-    from gateway import verify, verify_visibility
+    from gateway import verify, verify_visibility, verify_dimensions
+    verify_dimensions(sshbase, shares, api, {who:R/who/'herdr/herdr.sock' for who in 'abc'}, R)
+    result['gateway_background_and_active_pty_size_isolation']=True
     verify(sshbase,shares,api,{who:R/who/'herdr/herdr.sock' for who in 'abc'},
            lambda who,enabled:run([ROOT/'dist/bee','enable' if enabled else 'disable'],envs[who]))
     own=list(sshbase);own[own.index('-i')+1]=str(R/'a/key')
