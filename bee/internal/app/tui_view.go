@@ -30,6 +30,9 @@ func (m panelModel) body() (string, []int) {
 		add(st.muted.Render("Loading local configuration…"))
 		return strings.Join(lines, "\n"), rows
 	}
+	if m.page == 2 {
+		return m.hiveBody(), rows
+	}
 	if m.page == 0 {
 		add(st.text.Bold(true).Render("Connection"))
 		add(st.muted.Render("Your agent stays on this machine."))
@@ -172,17 +175,19 @@ func (m panelModel) View() tea.View {
 		status = "!  Offline"
 		statusStyle = st.danger
 	}
-	brand := st.badge.Render(" BEE ") + "  " + st.text.Bold(true).Render("Sharing")
-	if width < 38 {
-		brand = st.badge.Render(" BEE ")
-	}
+	brand := st.badge.Render(" BEE ")
 	header := brand + strings.Repeat(" ", max(1, width-lipgloss.Width(brand)-lipgloss.Width(status))) + statusStyle.Render(status)
-	tabs := []string{" [1] Connection ", " [2] Sharing "}
-	if width < 31 {
-		tabs = []string{"[1] Connect", "[2] Sharing"}
+	tabs := []string{" [1] Connection ", " [2] Sharing ", " [3] Hive "}
+	if width < 42 {
+		tabs = []string{"[1] Connect", "[2] Share", "[3] Hive"}
 	}
-	firstTabWidth := lipgloss.Width(tabs[0])
-	secondTabWidth := lipgloss.Width(tabs[1])
+	if width < 32 {
+		tabs = []string{"1 Conn", "2 Share", "3 Hive"}
+	}
+	tabWidths := make([]int, len(tabs))
+	for i, tab := range tabs {
+		tabWidths[i] = lipgloss.Width(tab)
+	}
 	for i := range tabs {
 		if m.page == i {
 			tabs[i] = st.accent.Bold(true).Underline(true).Render(tabs[i])
@@ -206,17 +211,23 @@ func (m panelModel) View() tea.View {
 	}
 	if notice == "" {
 		notice = "Live status · refreshes every 2s"
+		if m.page == 2 {
+			notice = "Hive sessions · auto-refresh"
+		}
 	}
 	keys := "Tab move · Enter edit · s sharing · u update"
 	if m.page == 1 {
 		keys = "↑↓ move · Space select · s sharing · u update"
 	}
+	if m.page == 2 {
+		keys = "↑↓ scroll · r refresh"
+	}
 	if m.editing {
 		keys = "Enter done · Tab next field · Ctrl+S save"
 	}
-	footer := []string{st.line.Render(strings.Repeat("─", width)), noticeStyle.Render(panelFit(safePanel(notice), width)), st.muted.Render(panelFit(keys, width)), st.muted.Render(panelFit("1/2 sections · r refresh · q close", width))}
+	footer := []string{st.line.Render(strings.Repeat("─", width)), noticeStyle.Render(panelFit(safePanel(notice), width)), st.muted.Render(panelFit(keys, width)), st.muted.Render(panelFit("1/2/3 sections · r refresh · q close", width))}
 	if width < 36 {
-		footer[3] = st.muted.Render("1/2 tabs · q close")
+		footer[3] = st.muted.Render("1/2/3 tabs · q close")
 	}
 	content := strings.Join(top, "\n") + "\n" + m.viewport.View() + "\n" + strings.Join(footer, "\n")
 	content = lipgloss.NewStyle().Padding(0, 2).Render(content)
@@ -234,11 +245,15 @@ func (m panelModel) View() tea.View {
 		x, y := click.X-2, click.Y
 		target := -99
 		if y == 3 {
-			if x >= 0 && x < firstTabWidth {
-				target = -1
-			} else if x >= firstTabWidth+1 && x < firstTabWidth+1+secondTabWidth {
-				target = -2
+			offset := 0
+			for i, tabWidth := range tabWidths {
+				if x >= offset && x < offset+tabWidth {
+					target = []int{-1, -2, -5}[i]
+					break
+				}
+				offset += tabWidth + 1
 			}
+
 		} else if y >= 5 && y < 5+m.viewport.Height() {
 			row := y - 5 + offset
 			for i, start := range rows {

@@ -1,8 +1,8 @@
 # Bee
 
-Bee is a publisher-only Herdr plugin. It has four capabilities: configure Hive,
-set a visible device name (hostname by default), select existing named sessions,
-and switch sharing on or off. Its TUI and CLI call the same application logic.
+Bee publishes selected Herdr sessions and shows who is sharing in the same Hive.
+Configure Hive, set a visible device name (hostname by default), select existing
+named sessions, and switch sharing on or off. Its TUI and CLI call the same application logic.
 
 ## Install
 
@@ -99,8 +99,8 @@ description = "Open Bee"
 
 | Input | Action |
 | --- | --- |
-| `1` / `2`, Left / Right | Connection / Sharing |
-| Tab / Shift+Tab, Up / Down | Move between fields or sessions |
+| `1` / `2` / `3`, Left / Right | Connection / Sharing / Hive |
+| Tab / Shift+Tab, Up / Down | Move between controls; scroll the Hive list |
 | Enter, click | Edit a field or activate a control |
 | Space, click a session | Share or unshare that session |
 | Ctrl+S | Save edited connection fields |
@@ -115,6 +115,18 @@ seconds when idle, with one snapshot request in flight. Slow responses do not
 block input; an error is shown without discarding drafts. Untouched fields pick
 up CLI changes while edited fields stay local until saved. Small panes scroll
 focused controls into view, and colors follow the terminal's light/dark theme.
+
+The **Hive** tab groups published sessions by Bee, with this device marked
+`(you)` first. It queries Hive with the configured device identity and verified
+host key, then adds this device's live publisher status because Hive's directory
+excludes the requesting device. Only online publications are listed; registered
+but disconnected devices and unshared sessions do not appear. The list refreshes
+asynchronously about every five seconds while the tab is open. Failed refreshes keep
+remote entries explicitly marked as last known until a query succeeds. Press `r`
+to retry, or use Up/Down and Page Up/Page Down to scroll larger lists.
+
+This tab is a directory. To open remote sessions in Herdr, complete
+[the receiving setup](../README.md#5-view-other-members-sharing).
 
 Host verification uses `~/.ssh/known_hosts` by default. Existing custom trust-store
 paths are preserved; `bee configure --known-hosts PATH` remains available as a CLI

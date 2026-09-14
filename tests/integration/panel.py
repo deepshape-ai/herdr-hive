@@ -69,6 +69,9 @@ def main():
             # Switch to the session list using actual terminal input.
             call(sock,'pane.send_text',{'pane_id':panel,'text':'2'})
             wait(lambda:'Shared sessions' in text())
+            call(sock,'pane.send_text',{'pane_id':panel,'text':'3'})
+            wait(lambda:'Bees in this Hive' in text())
+            assert 'Set up Connection to view Bees.' in text()
             if os.environ.get('BEE_TEST_RENDER_DIR'):
                 output=Path(os.environ['BEE_TEST_RENDER_DIR']);output.mkdir(parents=True,exist_ok=True)
                 frame=call(sock,'pane.read',{'pane_id':panel,'format':'ansi','source':'visible'})

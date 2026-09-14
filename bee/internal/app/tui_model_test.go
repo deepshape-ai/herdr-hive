@@ -118,7 +118,7 @@ func TestMissingSessionCanBeUnsharedWhileDiscoveryFails(t *testing.T) {
 func TestPanelFramesFitAndExposeControls(t *testing.T) {
 	for _, size := range [][2]int{{100, 36}, {60, 30}, {40, 20}, {28, 12}, {20, 8}} {
 		for _, dark := range []bool{false, true} {
-			for page := 0; page < 2; page++ {
+			for page := 0; page < 3; page++ {
 				m := readyPanel()
 				m.page = page
 				m.dark = dark
@@ -164,14 +164,15 @@ func TestPanelRenderFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dark := range []bool{false, true} {
-		for page := 0; page < 2; page++ {
+		for page := 0; page < 3; page++ {
 			m := readyPanel()
 			m.page = page
 			m.dark = dark
 			m.width = 64
 			m.height = 30
 			m.snapshot.config.Enabled = true
-			m.snapshot.status = publisher.Status{Connected: true}
+			m.snapshot.status = publisher.Status{Connected: true, Shares: []publisher.Share{{Name: "Design workstation", Label: "project-api"}}}
+			m.hive = hiveDirectory{loaded: true, panelHive: panelHive{target: hiveTarget{"hive.example.internal:2222", "/key", "/known"}, shares: []publisher.Share{{Name: "Build server", Label: "default"}, {Name: "Build server", Label: "release-check"}}}}
 			m.snapshot.config.Rules = []config.Rule{{Session: "project-api"}}
 			m.focus = page
 			m.layout()

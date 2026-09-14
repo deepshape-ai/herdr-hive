@@ -40,6 +40,8 @@ type panelClick struct {
 }
 
 type panelModel struct {
+	hive                                                   hiveDirectory
+	readHive                                               hiveReader
 	dirtyFields                                            [4]bool
 	ctx                                                    context.Context
 	app                                                    App
@@ -73,7 +75,7 @@ func (a App) TUI(ctx context.Context) error {
 }
 
 func newPanel(ctx context.Context, a App) panelModel {
-	m := panelModel{ctx: ctx, app: a, width: 60, height: 30, viewport: viewport.New()}
+	m := panelModel{readHive: publisher.Directory, ctx: ctx, app: a, width: 60, height: 30, viewport: viewport.New()}
 	for _, placeholder := range []string{"hive.example.internal:2222", "Your device name", "/absolute/path/to/hive_device", "hreg-…"} {
 		input := textinput.New()
 		input.Prompt = ""
@@ -176,15 +178,29 @@ func (m *panelModel) syncFields() {
 	}
 }
 func (m panelModel) itemCount() int {
+	if m.page == 2 {
+		return 1
+	}
 	if m.page == 0 {
 		return 5
 	}
 	return len(m.snapshot.sessions) + 1
 }
 func (m *panelModel) move(delta int) {
+	if m.page == 2 {
+		if delta > 0 {
+			m.viewport.ScrollDown(1)
+		} else {
+			m.viewport.ScrollUp(1)
+		}
+		return
+	}
 	m.focus = (m.focus + delta + m.itemCount()) % m.itemCount()
 }
 func (m *panelModel) activate() tea.Cmd {
+	if m.page == 2 {
+		return nil
+	}
 	if m.busy || !m.ready {
 		return nil
 	}
@@ -294,6 +310,16 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncFields()
 		m.ready = true
 		m.focus = min(m.focus, m.itemCount()-1)
+	case panelHive:
+		if msg.target == m.hive.target && msg.seq == m.hive.seq {
+			m.hive.loading = false
+			m.hive.err = msg.err
+			m.hive.next = time.Now().Add(5 * time.Second)
+			if msg.err == nil {
+				m.hive.shares = msg.shares
+				m.hive.loaded = true
+			}
+		}
 	case panelDone:
 		m.busy = false
 		if msg.err != nil {
@@ -338,8 +364,11 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editing = false
 		}
 		switch msg.target {
-		case -1, -2:
+		case -1, -2, -5:
 			m.page = -msg.target - 1
+			if msg.target == -5 {
+				m.page = 2
+			}
 			m.focus = 0
 			m.viewport.GotoTop()
 		case -3:
@@ -383,13 +412,17 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "q", "esc":
 			return m, tea.Quit
-		case "1", "2", "left", "right":
+		case "1", "2", "3", "left", "right":
 			if key == "1" {
 				m.page = 0
 			} else if key == "2" {
 				m.page = 1
+			} else if key == "3" {
+				m.page = 2
+			} else if key == "left" {
+				m.page = (m.page + 2) % 3
 			} else {
-				m.page = 1 - m.page
+				m.page = (m.page + 1) % 3
 			}
 			m.focus = 0
 			m.viewport.GotoTop()
@@ -406,7 +439,7 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "u":
 			cmd = m.run([]string{"update"})
 		case "r":
-			cmd = m.refresh()
+			cmd = tea.Batch(m.refresh(), m.refreshHive(true))
 		case "pgdown":
 			m.viewport.PageDown()
 		case "pgup":
@@ -424,6 +457,7 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 		}
 	}
+	cmd = tea.Batch(cmd, m.refreshHive(false))
 	m.layout()
 	return m, cmd
 }
