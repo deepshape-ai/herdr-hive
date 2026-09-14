@@ -18,17 +18,23 @@ curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/instal
 The default location is `~/.local/share/herdr-hive`. The `hive` commands below
 abbreviate the full executable path; no PATH changes are made.
 
-Collect one dedicated SSH **public** key per device into an authorized-keys file.
-Use plain public-key lines; authorized_keys options and SSH certificates are not
-part of v1. Never upload employee host login keys or private keys. Registered
-devices receive full access to published sessions, except their own.
+For token-based onboarding, create an empty external key file and issue a token
+before starting Hive:
 
 ```sh
 mkdir -m 700 ./hive-state
+touch ./authorized_keys
+hive enroll issue --tokens ./authorized_tokens --label onboarding
 hive --listen 0.0.0.0:2222 \
   --state-dir ./hive-state \
-  --authorized-keys ./authorized_keys
+  --authorized-keys ./authorized_keys \
+  --authorized-tokens ./authorized_tokens
 ```
+
+Devices register their own public keys with the token. For manual authorization,
+add dedicated device public keys to `authorized_keys`, one plain key per line.
+Private keys, SSH certificates and authorized_keys options are not accepted.
+Registered devices receive full access to published sessions, except their own.
 
 Hive creates a private host key on first start and prints its fingerprint. Verify
 that fingerprint through an administrator before adding the key to each client's
@@ -89,6 +95,30 @@ Usage is stored in `enrollment.json` before the public key is written. Failed ke
 writes roll back the new reservation. A crash may leave a reservation; retrying
 the same key resumes it without another use. Back up both files with the host
 key and names registry. Do not delete usage state to reset an active token's limit.
+
+## Connection details for new members
+
+Send these three items through a trusted channel:
+
+1. The reachable Hive address, such as `hive.example.internal:2222`.
+2. The `hreg-…` secret printed by `enroll issue`.
+3. A `known_hosts` entry for that address, containing Hive's public host key.
+
+For the root README's Quickstart installation, run this in another terminal after
+Hive starts. Replace the example hostname with the address members will use:
+
+```sh
+cd "$HOME/.local/share/herdr-hive"
+HIVE_HOST=hive.example.internal
+printf '[%s]:2222 ' "$HIVE_HOST" > ./hive_known_hosts
+ssh-keygen -y -f ./state/host_key >> ./hive_known_hosts
+ssh-keygen -lf ./hive_known_hosts
+```
+
+Send `hive_known_hosts` to members and have them save it to
+`~/.ssh/hive_known_hosts`. The file contains only the public host key; keep
+`state/host_key` private. For a custom or systemd installation, use the actual
+state directory and port. Members follow the [Bee registration steps](../README.md#3-register-with-a-token).
 
 ## Inspect
 

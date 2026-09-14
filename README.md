@@ -2,192 +2,155 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-Share selected Herdr sessions through a central SSH relay. Keep agents on their
-owners' machines and consume them with native `herdr machine add`.
+Share Herdr sessions with your team. Agents keep running on their owners' hosts;
+other members access shared workspaces through one native Herdr machine.
 
-| Product | Installed by | Responsibility |
-| --- | --- | --- |
-| [Hive](hive/README.md) | Relay administrator | Device authentication, names, native SSH adaptation, bounded duplex forwarding and operational details |
-| [Bee](bee/README.md) | Session publisher | Herdr plugin with matching terminal UI and CLI: configure Hive, choose a name, select sessions, toggle sharing |
+- **Hive** runs on a shared server and connects registered devices.
+- **Bee** is a Herdr plugin for joining Hive and choosing sessions to share.
 
-Consumers need Herdr and OpenSSH. No consumer plugin, personal-host SSH login,
-SSH agent forwarding or Herdr source changes are required. Any host can publish
-and consume. Hive excludes a device's own shares from its directory and rejects
-self-connections when the same device identity is used.
+No Herdr source changes or SSH login to members' hosts are needed. Tested with
+Herdr **0.9.0**. This is an independent community project.
 
-**Sharing grants full control of an entire Herdr named session to registered
-Hive members.** A named session can contain multiple workspaces, panes and agents.
-Hive is trusted with content in transit and does not record terminal contents.
-Read [security boundaries](SECURITY.md) before enabling sharing.
-
-## Status
-
-Initial implementation. Native Herdr **0.9.0** is the tested integration target.
-Bootstrap compatibility is explicit and unknown requests fail closed. This is an
-independent community project, not an official Herdr product.
+**Sharing gives registered Hive members full control of the selected session,
+including all its workspaces, panes and agents.** See [security boundaries](SECURITY.md).
 
 ## Quickstart
 
-Install [Herdr](https://herdr.dev/) on publishing and consuming hosts.
-The installer uses **sh, curl, tar and SHA-256 tools** already available on most
-macOS and Linux hosts. No additional language runtime is required.
-It selects the component's newest stable release, detects macOS/Linux and
-amd64/arm64, and verifies the release checksum. No version or platform selection
-is needed. Install Hive once on the shared machine and Bee on publishing hosts.
+Members need [Herdr](https://herdr.dev/) and OpenSSH. The installer selects the
+latest stable release for macOS/Linux, amd64/arm64, and verifies its checksum.
 
 ### 1. Install Hive on the shared machine
 
+Administrator only. If Hive is already running, start at step 2.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- hive
-```
-
-Installs into `~/.local/share/herdr-hive` and creates its private `state` directory.
-
-Create `authorized_keys` in this directory with the dedicated **public** keys of
-participating devices, one per line. The next section shows how each device
-creates its key. Never collect private keys or grant host SSH logins.
-
-Start Hive in the foreground:
-
-```sh
 cd "$HOME/.local/share/herdr-hive"
+touch authorized_keys
+./hive enroll issue --tokens ./authorized_tokens --label onboarding
 ./hive --listen 0.0.0.0:2222 \
-  --state-dir "$PWD/state" --authorized-keys "$PWD/authorized_keys"
+  --state-dir "$PWD/state" \
+  --authorized-keys "$PWD/authorized_keys" \
+  --authorized-tokens "$PWD/authorized_tokens"
 ```
 
-Keep this process running. Make port 2222 reachable from the office network and
-share the printed host-key fingerprint with members through a trusted channel.
-For a managed Linux service with resource limits, use the
-[systemd deployment instructions](hive/README.md#start).
+`enroll issue` prints a JSON `secret` beginning with `hreg-`. By default it never
+expires and has unlimited uses. Keep Hive running and make port 2222 reachable.
 
-Optionally, admit new devices with a token instead of collecting their public keys.
-Run `hive enroll issue --tokens ./authorized_tokens`, and add
-`--authorized-tokens "$PWD/authorized_tokens"` when starting Hive. New devices
-can then use `bee configure --hive HOST:PORT --identity PATH --known-hosts PATH
---token hreg-…` after verifying Hive's host key. The Connection panel also accepts
-a token. See [token issuance, limits and revocation](hive/README.md#enrollment-tokens).
+Give members the Hive address, token and verified `known_hosts` entry through a
+trusted channel. See [how to export the host entry](hive/README.md#connection-details-for-new-members).
+Device public keys are registered automatically when members redeem the token.
+[Service setup, token limits and revocation](hive/README.md).
 
 ### 2. Install Bee inside Herdr
 
+On each new device:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- bee
-herdr plugin action invoke configure --plugin herdr.bee
 ```
 
-Installs into `~/.local/share/herdr-bee` and automatically links and enables the
-Herdr plugin. The executable stays in that directory; no global `bee` command
-or PATH change is required.
+Bee is installed into `~/.local/share/herdr-bee` and linked to Herdr automatically.
+The commands below use its full path; no PATH changes are needed.
 
-Create a dedicated device key if you do not already have one:
+### 3. Register with a token
+
+First create a dedicated device key, unless you already have one:
 
 ```sh
 mkdir -p "$HOME/.ssh"
 ssh-keygen -t ed25519 -f "$HOME/.ssh/hive_device"
-# If you chose a passphrase, unlock the key for Bee:
-ssh-add "$HOME/.ssh/hive_device"
 ```
 
-Give `hive_device.pub` to the Hive administrator. Obtain Hive's SSH host key and
-verify its fingerprint against the administrator's value before adding it to a
-`known_hosts` file. For example, `ssh-keyscan -p 2222 hive.example.internal`
-retrieves a candidate key; scanning alone does not verify its identity.
+If you set a key passphrase, run `ssh-add "$HOME/.ssh/hive_device"` to unlock it.
+Save the administrator's verified host entry to `~/.ssh/hive_known_hosts`.
+This must be a `known_hosts` entry containing the address, key type and public key,
+not just a fingerprint.
 
-Bee opens in a separate split pane. The same action focuses the existing panel
-in this tab, or closes it when already focused. Use `prefix+alt+b` after adding
-[the shortcut](bee/README.md#panel-controls).
+Replace the example address and token with the administrator's values:
 
-1. In **Connection**, enter the Hive address, visible name and device-key path. Click a field or press Enter to edit; Ctrl+S saves.
-2. Open **Sessions** with `2` or click its tab. Use arrow keys and Space, or click
-   a row, to select an existing running named session.
-3. Choose **Start sharing** or press `s`. The header shows connection status and
-   refreshes automatically without interrupting form edits.
+```sh
+"$HOME/.local/share/herdr-bee/bee" configure \
+  --hive hive.example.internal:2222 \
+  --token hreg-REPLACE_WITH_YOUR_TOKEN \
+  --identity "$HOME/.ssh/hive_device" \
+  --known-hosts "$HOME/.ssh/hive_known_hosts"
+```
 
-A named session includes all its workspaces, panes and agents. Registered Hive
-members receive full control of what you publish. Closing the settings pane does
-not stop sharing. The [bundled CLI](bee/README.md#first-publication) offers the
-same controls for scripts and agents, using its full plugin-directory path.
+Success registers the device and saves its connection settings. The token is not
+saved; later connections use the device key. **The current Bee still requires
+this key and a verified host entry. Address and token alone are not enough.**
 
-### 3. Connect from another host
+### 4. Choose sessions and start sharing
 
-Consumers need no Bee installation. Register their dedicated device public key
-with Hive, then configure an SSH alias named `hive` with `User hive`, following
-[native consumer setup](hive/README.md#native-consumer-setup):
+```sh
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+1. In **[1] Connection**, optionally change your visible name and save with Ctrl+S.
+2. In **[2] Sharing**, select an existing running named session, such as `default`.
+3. Choose **Start sharing**. Confirm the header shows **Connected**.
+
+A named session contains its own workspaces, panes and agents. Closing the Bee
+panel leaves sharing running. For scripts, see the [Bee CLI steps](bee/README.md#first-publication).
+
+### 5. View other members' sharing
+
+After registering this device in step 3, add the following to `~/.ssh/config`,
+replacing the example host with your Hive host:
+
+```sshconfig
+Host hive
+    HostName hive.example.internal
+    Port 2222
+    User hive
+    IdentityFile ~/.ssh/hive_device
+    UserKnownHostsFile ~/.ssh/hive_known_hosts
+    IdentitiesOnly yes
+    StrictHostKeyChecking yes
+```
 
 ```sh
 herdr machine add hive --label Hive
 ```
 
-One machine automatically shows other devices' shared workspaces as
-`[Bee name] session / workspace`. No Herdr changes are needed. Use the same device
-key for publishing and consuming to exclude your own shares. The optional
-sharing-ID aliases still provide a direct connection to one published session.
+Herdr automatically shows shared workspaces as `[Bee name] session / workspace`,
+for example `[Alice] research / xxx`. Using the same device key hides your own
+sharing. A device that only views others can skip step 4.
+[Gateway limits and direct-session access](hive/README.md#native-consumer-setup).
 
-### 4. Update Hive and Bee
+## Update
 
-**Bee:** choose **Update Bee** in its Herdr settings pane, or run:
+On a Bee host:
 
 ```sh
-herdr plugin action invoke update --plugin herdr.bee
-# Optional synchronous CLI result, without a global command:
 "$HOME/.local/share/herdr-bee/bee" update
 ```
 
-**Hive:** in another terminal on the relay, use the installation and state
-locations from step 1:
+On the Hive server, in another terminal:
 
 ```sh
 "$HOME/.local/share/herdr-hive/hive" update \
   --state-dir "$HOME/.local/share/herdr-hive/state"
 ```
 
-For the systemd installation, the equivalent is
-`sudo /usr/local/bin/hive update --state-dir /var/lib/herdr-hive`.
+For systemd installations, use `sudo /usr/local/bin/hive update --state-dir /var/lib/herdr-hive`.
+Updates briefly disconnect remote viewers; publishers reconnect and local agents
+keep running. Use these commands for upgrades; the installer is for first-time
+setup. [Update details](docs/UPDATING.md).
 
-Both commands select their component's newest stable release, verify the download
-and activate the new program. Downloads keep current sharing online; activation
-briefly disconnects viewers and the publishers reconnect. Local agents, settings
-and share IDs are preserved. This is **not a zero-disconnection hot update**.
-
-The installer is for new installations and leaves existing directories untouched.
-Use the commands above for upgrades. For a custom installation path, append
-`--install-dir /absolute/path` to the installer command.
-[Update details](docs/UPDATING.md).
-
-## Build
-
-Go versions and dependencies are pinned independently in `hive/go.mod` and
-`bee/go.mod`. Production users install binaries; they do not need Go.
+## Development and documentation
 
 ```sh
 make build
 make test vet
-make package VERSION=0.1.0
-# Independent delivery:
-make package-hive VERSION=0.1.0
-make package-bee VERSION=0.1.0
 ```
 
-Each component can also be built independently:
-
-```sh
-cd hive && go build ./cmd/hive
-# or, from the repository root:
-cd bee && go build ./cmd/bee
-```
-
-Release archives are generated under ignored `dist/`. Hive and Bee have independent
-release tags (`hive/vX.Y.Z`, `bee/vX.Y.Z`) and communicate through [protocol v1](protocol/v1.md).
-No remote repository or public release is created by these commands.
-
-## Documentation
-
-- [Hive deployment and inspection](hive/README.md)
-- [Bee installation and use](bee/README.md)
+- [Hive deployment, tokens and inspection](hive/README.md)
+- [Bee CLI and panel controls](bee/README.md)
 - [Architecture and compatibility](docs/DESIGN.md)
-- [One-command upgrades](docs/UPDATING.md)
-- [Verification evidence and limits](docs/EVIDENCE.md)
-- [Integration test instructions](tests/integration/README.md)
-- [GitHub Actions releases](docs/RELEASING.md)
+- [Verification evidence](docs/EVIDENCE.md) and [integration tests](tests/integration/README.md)
+- [Packaging and independent releases](docs/RELEASING.md)
 - [Contributing](CONTRIBUTING.md)
 
-MIT licensed. Herdr itself is installed separately under its own license.
+MIT licensed. Herdr is installed separately under its own license.

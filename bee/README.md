@@ -29,20 +29,32 @@ override. No top-level `herdr bee` command is injected.
 
 ## First publication
 
-Create a dedicated SSH device identity if you do not already have one, register
-its public key with the Hive administrator or obtain an enrollment token, and verify Hive's host key. Encrypted
-identities must be unlocked in the local SSH agent; Bee does not forward that agent.
+1. Obtain the Hive address, an enrollment token and a verified host entry from
+   the administrator. Prepare your device key and `~/.ssh/hive_known_hosts` using
+   the [registration steps](../README.md#3-register-with-a-token). Bee does not
+   generate the key or establish host trust automatically. If the key is encrypted,
+   unlock it with `ssh-add`; Bee does not forward your SSH agent.
+2. Register and save the connection settings:
 
-```sh
-bee configure --hive hive.example.internal:2222 \
-  --identity /absolute/path/to/hive_device \
-  --known-hosts /absolute/path/to/known_hosts
-bee name "My workstation"
-bee sessions
-bee share project
-bee enable
-bee status
-```
+   ```sh
+   bee configure --hive hive.example.internal:2222 \
+     --token hreg-REPLACE_WITH_YOUR_TOKEN \
+     --identity "$HOME/.ssh/hive_device" \
+     --known-hosts "$HOME/.ssh/hive_known_hosts"
+   ```
+
+   This requires Hive v0.2.0 or later with enrollment enabled. Registration runs
+   before settings are saved; failure leaves the configuration unchanged. The
+   token is never saved to `config.json`; later connections use your device key.
+3. Set a name, list running sessions, then choose one and start sharing:
+
+   ```sh
+   bee name "My workstation"
+   bee sessions
+   bee share project
+   bee enable
+   bee status
+   ```
 
 `project` must be an existing, running **Herdr named session**, not a workspace or
 agent name. Share selection is saved while sharing is off. `enable` launches one
@@ -59,12 +71,9 @@ continues retrying. Use `status` to distinguish saved intent from live connectiv
 changing share IDs. One device identity should belong to one Bee instance; a
 second concurrent publisher using that identity is rejected.
 
-To register and configure in one command, append `--token hreg-…` to
-`bee configure`. This requires Hive v0.2.0 with enrollment enabled. Registration
-runs before settings are saved; rejection leaves the configuration unchanged.
-The token is never written to `config.json` or command JSON output. The Connection
-panel offers the same optional masked token field and clears it after saving.
-Tokens do not replace host-key verification or the local SSH identity.
+The Connection panel also accepts a masked enrollment token and clears it after
+saving. It uses `~/.ssh/known_hosts` by default, or the custom file already saved
+by `configure`. You can omit the token when the device key is already authorized.
 
 ## Panel controls
 
