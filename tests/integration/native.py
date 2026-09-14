@@ -62,6 +62,7 @@ def main():
              '-o',install/component,'./cmd/'+component],timeout=90)
     if os.environ.get('BEE_NATIVE_TEST_BINARY'):
         shutil.copy2(os.environ['BEE_NATIVE_TEST_BINARY'], install/'bee')
+    initial_bee_version=run([install/'bee','version']).stdout.strip()
     for who in ['hive', 'a', 'b', 'c', 'd', 'consumer']:
         (R / who).mkdir(mode=0o700)
     for who in ['a', 'b', 'c', 'd', 'consumer']:
@@ -207,13 +208,14 @@ def main():
             return state.get('connected') and state['shares'][0]['id']==shares[who]['id']
         wait(reconnected,20)
     before_bee=json.loads(run([ROOT/'dist/bee','status'],envs['c']).stdout)
-    assert before_bee['version']=='0.0.1'
+    assert before_bee['version']==initial_bee_version
+    expected_bee=run([ROOT/'dist/bee','version']).stdout.strip()
     with socket.socket(socket.AF_UNIX) as control:
         control.settimeout(10);control.connect(str(R/'c/bee/control.sock'))
         control.sendall(b'"restart"\n');control.recv(65536)
     def bee_restarted():
         state=json.loads(run([ROOT/'dist/bee','status'],envs['c']).stdout)
-        return state.get('connected') and state.get('version')==expected and state.get('pid')==before_bee['pid'] and state['shares'][0]['id']==shares['c']['id']
+        return state.get('connected') and state.get('version')==expected_bee and state.get('pid')==before_bee['pid'] and state['shares'][0]['id']==shares['c']['id']
     wait(bee_restarted,20)
     assert api(R/'a/herdr/herdr.sock','session.snapshot')
     p=pexpect.spawn(BIN,['--remote','shared-c'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(50,170));terminals.append(p)
