@@ -16,7 +16,7 @@ import (
 func TestHoneycombFitsAndKeepsEverySession(t *testing.T) {
 	compact := func(s string) string {
 		return strings.Map(func(r rune) rune {
-			if unicode.IsSpace(r) || strings.ContainsRune("╱╲─", r) {
+			if unicode.IsSpace(r) || strings.ContainsRune("╱╲─│", r) {
 				return -1
 			}
 			return r
@@ -24,7 +24,7 @@ func TestHoneycombFitsAndKeepsEverySession(t *testing.T) {
 	}
 	for _, width := range []int{24, 36, 49, 60, 96, 120} {
 		for _, dark := range []bool{false, true} {
-			for _, count := range []int{1, 2, 7} {
+			for _, count := range []int{1, 2, 3, 7} {
 				var bees []hiveBee
 				for i := 0; i < count; i++ {
 					bees = append(bees, hiveBee{name: fmt.Sprintf("设备-%d-with-a-long-name", i), local: i == 0, sessions: []string{"default", fmt.Sprintf("review-%d", i), "very-long-session-with-many-characters"}})
@@ -34,7 +34,7 @@ func TestHoneycombFitsAndKeepsEverySession(t *testing.T) {
 					t.Fatalf("%d Bees overflow width %d", count, width)
 				}
 				for _, bee := range bees {
-					text := compact(strings.Join(hiveCell(bee, min(30, width), stylesFor(dark), false), "\n"))
+					text := compact(strings.Join(hiveCell(bee, min(24, width), stylesFor(dark), false), "\n"))
 					if !strings.Contains(text, compact(bee.name)) {
 						t.Fatal("Bee name was lost")
 					}
@@ -73,7 +73,7 @@ func TestHoneycombRenderMatrix(t *testing.T) {
 			m.dark = dark
 			m.snapshot.config.Name = "carol"
 			m.snapshot.status = publisher.Status{Connected: true, Shares: []publisher.Share{{Name: "carol", Label: "default"}}}
-			m.hive = hiveDirectory{loaded: true, panelHive: panelHive{target: hiveTarget{"hive.example.internal:2222", "/key", "/known"}, shares: []publisher.Share{{Name: "ltq", Label: "default"}}}}
+			m.hive = hiveDirectory{loaded: true, panelHive: panelHive{target: hiveTarget{"hive.example.internal:2222", "/key", "/known"}, shares: []publisher.Share{{Name: "ltq", Label: "default"}, {Name: "ringo", Label: "default"}}}}
 			m.layout()
 			frame := m.View().Content
 			if lipgloss.Width(frame) > m.width || lipgloss.Height(frame) > m.height {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -13,8 +14,8 @@ func hiveHoneycomb(bees []hiveBee, width int, st panelStyles, stale bool) string
 	if len(bees) == 0 {
 		return ""
 	}
-	columns := min(len(bees), max(1, min(3, (width+1)/25)))
-	cellWidth := min(30, (width-(columns-1))/columns)
+	columns := min(len(bees), max(1, min(3, (width+1)/23)))
+	cellWidth := min(24, (width-(columns-1))/columns)
 	gridWidth := columns*cellWidth + columns - 1
 	margin := strings.Repeat(" ", max(0, (width-gridWidth)/2))
 	var lines []string
@@ -24,7 +25,7 @@ func hiveHoneycomb(bees []hiveBee, width int, st panelStyles, stale bool) string
 		for col := 0; col < columns && start+col < len(bees); col++ {
 			cell := hiveCell(bees[start+col], cellWidth, st, stale && !bees[start+col].local)
 			if col%2 == 1 {
-				cell = append([]string{"", "", ""}, cell...)
+				cell = append([]string{"", ""}, cell...)
 			}
 			cells[col] = cell
 			height = max(height, len(cell))
@@ -58,44 +59,52 @@ func hiveCell(bee hiveBee, width int, st panelStyles, stale bool) []string {
 	if stale {
 		border = st.line
 	}
-	inset := 3
-	textWidth := max(1, width-2*inset-4)
-	var content []string
-	add := func(s string) { content = append(content, strings.Split(ansi.Hardwrap(s, textWidth, false), "\n")...) }
-	add(st.text.Bold(true).Render(safePanel(bee.name)))
-	state := "● CONNECTED"
-	stateStyle := st.success
+	textWidth := max(1, width-6)
+	type cellLine struct {
+		text  string
+		style lipgloss.Style
+	}
+	var content []cellLine
+	add := func(text string, style lipgloss.Style) {
+		for _, line := range strings.Split(ansi.Hardwrap(text, textWidth, false), "\n") {
+			content = append(content, cellLine{line, style})
+		}
+	}
+	count := fmt.Sprintf("%d sessions", len(bee.sessions))
+	if len(bee.sessions) == 1 {
+		count = "1 session"
+	}
+	dot, state, stateStyle := "●", count, st.success
 	if bee.local {
-		state = "● YOU"
-		stateStyle = st.accent
+		state, stateStyle = "YOU · "+count, st.accent
 	}
 	if stale {
-		state = "○ LAST KNOWN"
-		stateStyle = st.muted
+		dot, state, stateStyle = "○", "LAST KNOWN", st.muted
 	}
-	add(stateStyle.Render(state))
-	add("")
+	add(dot+" "+safePanel(bee.name), st.text.Bold(true))
+	add(state, stateStyle)
 	for _, session := range bee.sessions {
-		add(st.text.Render(safePanel(session)))
+		add(safePanel(session), st.text)
 	}
 	if len(bee.sessions) == 0 {
-		add(st.muted.Render("No sessions"))
+		add("No sessions", st.muted)
 	}
-	// One breathing row at each end keeps names away from the sloping edges.
-	content = append([]string{""}, append(content, "")...)
-	rows := make([]string, 0, len(content)+2)
-	cap := strings.Repeat(" ", inset) + border.Render(strings.Repeat("─", width-2*inset)) + strings.Repeat(" ", inset)
-	rows = append(rows, cap)
-	for i, text := range content {
-		distance := min(i, len(content)-1-i)
-		indent := max(0, inset-1-distance)
-		left, right := "╱", "╲"
-		if i*2 >= len(content) {
-			left, right = "╲", "╱"
+	// Short shoulders and straight sides keep the hexagon intact when names or
+	// multiple sessions need more rows. The opaque interior protects contrast
+	// in translucent terminals without changing any host or publisher colors.
+	cap := "  " + border.Render(strings.Repeat("─", max(0, width-4))) + "  "
+	rows := []string{cap}
+	for i, line := range content {
+		text := line.text
+		inset, left, right := 0, "│", "│"
+		if i == 0 {
+			inset, left, right = 1, "╱", "╲"
 		}
-		inner := width - 2*indent - 2
+		inner := max(0, width-2*inset-2)
 		padding := max(0, inner-lipgloss.Width(text))
-		rows = append(rows, strings.Repeat(" ", indent)+border.Render(left)+strings.Repeat(" ", padding/2)+text+strings.Repeat(" ", padding-padding/2)+border.Render(right)+strings.Repeat(" ", indent))
+		body := strings.Repeat(" ", padding/2) + text + strings.Repeat(" ", padding-padding/2)
+		rows = append(rows, strings.Repeat(" ", inset)+border.Render(left)+line.style.Background(st.cell.GetBackground()).Render(body)+border.Render(right)+strings.Repeat(" ", inset))
 	}
-	return append(rows, cap)
+	rows = append(rows, " "+border.Render("╲")+st.cell.Render(strings.Repeat(" ", max(0, width-4)))+border.Render("╱")+" ", cap)
+	return rows
 }
