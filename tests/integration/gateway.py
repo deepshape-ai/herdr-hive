@@ -93,7 +93,7 @@ def verify(sshbase, shares, api, paths, set_enabled=None):
         assert len({x['workspace_id'] for x in workspaces})==3
         assert len({x['pane_id'] for x in panes})==3
         for who in 'abc':
-            expected=f'[{shares[who]["name"]}] default / HOST_{who}'
+            expected=f'[{shares[who]["name"]}] HOST_{who}'
             workspace=next(x for x in workspaces if x['label']==expected)
             pane=next(x for x in panes if x['workspace_id']==workspace['workspace_id'])
             response=w.request('focus-'+who,'workspace.focus',{'workspace_id':workspace['workspace_id']})

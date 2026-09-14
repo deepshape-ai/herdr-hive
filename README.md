@@ -140,9 +140,9 @@ before adding the machine. After `machine add` reports that the remote server is
 ready, open Herdr clients connect automatically; look for the **Hive** machine
 in the sidebar. Add the machine once per receiving device.
 
-Herdr automatically shows shared workspaces as `[Bee name] session / workspace`,
-for example `[Alice] research / xxx`. Using the same device key hides your own
-sharing. A device that only views others can skip step 4.
+Herdr automatically shows shared workspaces as `[Bee name/session] workspace`,
+for example `[Alice/research] xxx`. The default session is shortened to
+`[Alice] xxx`. Using the same device key hides your own sharing. A device that only views others can skip step 4.
 [Gateway limits and direct-session access](hive/README.md#native-consumer-setup).
 
 If both Bees show Connected but no shared workspaces appear, check

@@ -200,7 +200,11 @@ func TestSnapshotPrefixAndFocusIsolation(t *testing.T) {
 		snap["revision"] = float64(7)
 		snap["focused_workspace_id"] = "w1"
 		snap["workspaces"] = []any{map[string]any{"workspace_id": "w1", "label": "xxx", "focused": true}}
-		g.sources[id] = &backend{source: Source{ID: id, Name: id, Label: "research"}, prefix: id + "/", snapshot: snap}
+		session := "default"
+		if id == "b" {
+			session = "research"
+		}
+		g.sources[id] = &backend{source: Source{ID: id, Name: id, Label: session}, prefix: id + "/", snapshot: snap}
 	}
 	if e := g.publish(); e != nil {
 		t.Fatal(e)
@@ -217,8 +221,16 @@ func TestSnapshotPrefixAndFocusIsolation(t *testing.T) {
 		t.Fatal("bad snapshot")
 	}
 	ws := array(v["workspaces"])
-	if len(ws) != 2 || object(ws[0])["label"] != "[a] research / xxx" || object(ws[1])["focused"] != false {
+	if len(ws) != 2 || object(ws[0])["label"] != "[a] xxx" || object(ws[1])["label"] != "[b/research] xxx" || object(ws[1])["focused"] != false {
 		t.Fatal(v)
+	}
+	if object(ws[0])["workspace_id"] != "a/w1" || object(ws[1])["workspace_id"] != "b/w1" {
+		t.Fatal("display labels changed resource identity", ws)
+	}
+	for _, b := range g.sources {
+		if object(array(b.snapshot["workspaces"])[0])["label"] != "xxx" {
+			t.Fatal("owner workspace label was changed")
+		}
 	}
 	if _, e := io.ReadAll(g.out); e != nil {
 		t.Fatal(e)

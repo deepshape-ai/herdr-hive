@@ -119,7 +119,7 @@ herdr machine list
 第一条命令会列出其他设备的在线共享，并验证 SSH 身份和连接。`machine add` 提示远端服务就绪后，
 已打开的 Herdr 客户端会自动连接，在侧栏找到 **Hive** machine 即可。每台接收设备只需添加一次。
 
-Herdr 会自动展示共享工作区，名称为 `[Bee name] session / workspace`，例如 `[Alice] research / xxx`。使用同一设备密钥会隐藏自己发布的共享。只访问他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
+Herdr 会自动展示共享工作区，名称为 `[Bee name/session] workspace`，例如 `[Alice/research] xxx`；默认 session 简写为 `[Alice] xxx`。使用同一设备密钥会隐藏自己发布的共享。只访问他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
 
 如果两台 Bee 都显示 Connected，但 Herdr 看不到共享，先检查 `herdr machine list`。
 列表为空说明尚未添加接收端。`hive inspect` 中共享会话的 `connections=0` 表示当前没有消费者访问，

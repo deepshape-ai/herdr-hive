@@ -58,7 +58,10 @@ Different keys represent different devices even when they share an IP or hostnam
 4. Hive resolves name collisions and registers selected targets on that transport.
    An acknowledged registration returns stable IDs and the resolved display name.
 5. Another device adds one `User hive` SSH alias through native `herdr machine add`.
-   Hive aggregates visible publications under `[Bee name] session / workspace`.
+   Hive aggregates visible publications under `[Bee name/session] workspace`,
+   omitting `/default` for the default session. Labels keep the source first and
+   do not change when other sessions connect or disconnect; resource IDs and
+   owner workspace names are unchanged.
    A `User s-…` alias optionally selects one share; no remote session override is used.
 6. Hive recognizes supported native bootstrap requests and maps them to fixed Bee
    operations. Bee returns live Herdr status or opens the selected client socket.

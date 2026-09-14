@@ -156,9 +156,9 @@ herdr machine add hive --label Hive
 ```
 
 Unmodified Herdr 0.9.0 automatically shows other devices' online shared sessions
-under this one machine. Workspace labels are `[Bee name] session / workspace`,
-for example `[Alice] research / xxx`. Hive refreshes membership every second;
-new publications appear and offline publications disappear. Names and IDs are
+under this one machine. Workspace labels are `[Bee name/session] workspace`,
+for example `[Alice/research] xxx`; the default session appears as `[Alice] xxx`.
+Hive refreshes membership every second; new publications appear and offline publications disappear. Names and IDs are
 projected by Hive; the owner's actual workspace names are unchanged. Sharing and
 consuming with the same key hides your own publications.
 

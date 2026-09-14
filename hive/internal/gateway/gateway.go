@@ -380,7 +380,11 @@ func (g *session) publish() error {
 					m["focused"] = false
 				}
 				if k == "workspaces" {
-					m["label"] = fmt.Sprintf("[%s] %s / %s", b.source.Name, b.source.Label, stringVal(m["label"]))
+					source := b.source.Name
+					if b.source.Label != "default" {
+						source += "/" + b.source.Label
+					}
+					m["label"] = fmt.Sprintf("[%s] %s", source, stringVal(m["label"]))
 					m["custom_label"] = true
 					m["number"] = len(array(out[k])) + 1
 				}
