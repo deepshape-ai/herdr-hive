@@ -110,8 +110,13 @@ panel leaves sharing running. For scripts, see the [Bee CLI steps](bee/README.md
 
 ### 5. View other members' sharing
 
+**Do this on every device that needs to view shared workspaces, including devices
+already publishing with Bee.** Bee's Connected status confirms publication to
+Hive; it does not add a receiving machine to Herdr.
+
 After registering this device in step 3, add the following to `~/.ssh/config`,
-replacing the example host with your Hive host:
+replacing the example host with your Hive host. Use the same identity and verified
+host file configured in Bee. Place this block before any broad `Host *` defaults:
 
 ```sshconfig
 Host hive
@@ -125,13 +130,27 @@ Host hive
 ```
 
 ```sh
+ssh -o BatchMode=yes hive 'list --json'
 herdr machine add hive --label Hive
+herdr machine list
 ```
+
+The SSH command lists other devices' online shares and verifies authentication
+before adding the machine. After `machine add` reports that the remote server is
+ready, open Herdr clients connect automatically; look for the **Hive** machine
+in the sidebar. Add the machine once per receiving device.
 
 Herdr automatically shows shared workspaces as `[Bee name] session / workspace`,
 for example `[Alice] research / xxx`. Using the same device key hides your own
 sharing. A device that only views others can skip step 4.
 [Gateway limits and direct-session access](hive/README.md#native-consumer-setup).
+
+If both Bees show Connected but no shared workspaces appear, check
+`herdr machine list` first. An empty list means the receiving machine has not
+been added. In `hive inspect`, a published session with `connections=0` has no
+active consumers; that counter does not mean the Bee failed to publish. An empty
+`ssh hive 'list --json'` result means no other device is currently publishing a
+visible session; your own publications are intentionally hidden.
 
 ## Update
 

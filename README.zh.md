@@ -93,7 +93,11 @@ herdr plugin action invoke configure --plugin herdr.bee
 
 ### 5. 访问其他成员的共享
 
-本机完成第 3 步注册后，将下面的配置加入 `~/.ssh/config`，把示例主机名替换为你的 Hive 主机名：
+**每台需要查看共享工作区的设备都要执行这一步，包括已经通过 Bee 分享的设备。**
+Bee 显示 Connected 只说明发布端已连接 Hive，不会自动给 Herdr 添加接收端 machine。
+
+本机完成第 3 步注册后，将下面的配置加入 `~/.ssh/config`，把示例主机名替换为你的 Hive 主机名。
+使用与 Bee 相同的设备密钥和已核验的主机公钥文件，并把此配置块放在通用 `Host *` 默认配置之前：
 
 ```sshconfig
 Host hive
@@ -107,10 +111,20 @@ Host hive
 ```
 
 ```sh
+ssh -o BatchMode=yes hive 'list --json'
 herdr machine add hive --label Hive
+herdr machine list
 ```
 
+第一条命令会列出其他设备的在线共享，并验证 SSH 身份和连接。`machine add` 提示远端服务就绪后，
+已打开的 Herdr 客户端会自动连接，在侧栏找到 **Hive** machine 即可。每台接收设备只需添加一次。
+
 Herdr 会自动展示共享工作区，名称为 `[Bee name] session / workspace`，例如 `[Alice] research / xxx`。使用同一设备密钥会隐藏自己发布的共享。只访问他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
+
+如果两台 Bee 都显示 Connected，但 Herdr 看不到共享，先检查 `herdr machine list`。
+列表为空说明尚未添加接收端。`hive inspect` 中共享会话的 `connections=0` 表示当前没有消费者访问，
+不表示 Bee 发布失败。若 `ssh hive 'list --json'` 返回空列表，说明当前没有其他设备发布可见会话；
+自己发布的会话会按设计隐藏。
 
 ## 更新
 
