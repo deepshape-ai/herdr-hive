@@ -116,8 +116,10 @@ block input; an error is shown without discarding drafts. Untouched fields pick
 up CLI changes while edited fields stay local until saved. Small panes scroll
 focused controls into view, and colors follow the terminal's light/dark theme.
 
-The **Hive** tab groups published sessions by Bee, with this device marked
-`(you)` first. It queries Hive with the configured device identity and verified
+The **Hive** tab arranges Bees as a honeycomb, with this device marked `YOU`
+and outlined in honey yellow. Each cell shows the Bee name, connection status
+and published sessions. The layout adapts from one to three columns; long names
+wrap inside cells, and larger hives scroll vertically. It queries Hive with the configured device identity and verified
 host key, then adds this device's live publisher status because Hive's directory
 excludes the requesting device. Only online publications are listed; registered
 but disconnected devices and unshared sessions do not appear. The list refreshes

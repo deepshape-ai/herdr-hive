@@ -213,6 +213,9 @@ func (m panelModel) View() tea.View {
 		notice = "Live status · refreshes every 2s"
 		if m.page == 2 {
 			notice = "Hive sessions · auto-refresh"
+			if width < 36 {
+				notice = "Hive · auto-refresh"
+			}
 		}
 	}
 	keys := "Tab move · Enter edit · s sharing · u update"

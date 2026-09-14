@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/config"
 	"github.com/deepshape-ai/herdr-hive/bee/internal/publisher"
 )
@@ -87,7 +88,9 @@ func (m panelModel) hiveBody() string {
 	var lines []string
 	add := func(s string) { lines = append(lines, panelFit(s, width)) }
 	add(st.text.Bold(true).Render("Bees in this Hive"))
-	add(st.muted.Render(safePanel(m.snapshot.config.Hive)))
+	for _, line := range strings.Split(ansi.Hardwrap(safePanel(m.snapshot.config.Hive), width, false), "\n") {
+		add(st.muted.Render(line))
+	}
 	add("")
 	if m.hive.target.address == "" || m.hive.target.identity == "" || m.hive.target.knownHosts == "" {
 		add(st.muted.Render("Set up Connection to view Bees."))
@@ -107,33 +110,25 @@ func (m panelModel) hiveBody() string {
 	case !m.hive.loaded:
 		add(st.muted.Render("Loading connected Bees…"))
 	default:
-		add(st.muted.Render(fmt.Sprintf("%d Bees · %d shared sessions", len(bees), count)))
+		summary := fmt.Sprintf("%d Bees · %d shared sessions", len(bees), count)
+		if width < 36 {
+			summary = fmt.Sprintf("%d Bees · %d sessions", len(bees), count)
+		}
+		add(st.muted.Render(summary))
 	}
 	add("")
-	for _, bee := range bees {
-		name := safePanel(bee.name)
-		if bee.local {
-			name = panelFit(name, max(1, width-10)) + " (you)"
-		}
-		mark := st.success.Render("● ")
-		if !bee.local && m.hive.err != nil {
-			mark = st.muted.Render("○ ")
-		}
-		add(mark + st.text.Bold(true).Render(name))
-		for i, session := range bee.sessions {
-			branch := "  ├ "
-			if i == len(bee.sessions)-1 {
-				branch = "  └ "
-			}
-			add(st.muted.Render(branch) + st.text.Render(safePanel(session)))
+	if len(bees) > 0 {
+		for _, line := range strings.Split(hiveHoneycomb(bees, width, st, m.hive.err != nil), "\n") {
+			add(line)
 		}
 		add("")
 	}
+
 	if m.hive.loaded && m.hive.err == nil && len(bees) == 0 {
 		add(st.muted.Render("No Bees are sharing sessions yet."))
 		add("")
 	}
-	add(st.muted.Render("Only published sessions appear here."))
+	add(st.muted.Render("Published sessions only."))
 	return strings.Join(lines, "\n")
 }
 
