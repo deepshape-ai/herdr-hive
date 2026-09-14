@@ -9,19 +9,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-type panelStyles struct{ text, muted, accent, success, danger, line, selected, badge, cell lipgloss.Style }
+type panelStyles struct{ text, muted, accent, success, danger, line, selected, badge lipgloss.Style }
 
 func stylesFor(dark bool) panelStyles {
-	surface := "#E8E9E2"
-	if dark {
-		surface = "#2D3238"
-	}
 	ink, muted, accent, green, red, line, selected := "#343C44", "#737A80", "#8A651F", "#34715C", "#B4483C", "#C9CDCB", "#E8E4D9"
 	if dark {
 		ink, muted, accent, green, red, line, selected = "#DADEE2", "#959DA6", "#DAB66E", "#79BC9C", "#EE9C8C", "#444B53", "#37362F"
 	}
 	style := func(c string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(c)) }
-	return panelStyles{cell: lipgloss.NewStyle().Background(lipgloss.Color(surface)), text: style(ink), muted: style(muted), accent: style(accent), success: style(green), danger: style(red), line: style(line), selected: style(ink).Background(lipgloss.Color(selected)), badge: lipgloss.NewStyle().Foreground(lipgloss.Color("#292B2C")).Background(lipgloss.Color("#E3BF73")).Bold(true)}
+	return panelStyles{text: style(ink), muted: style(muted), accent: style(accent), success: style(green), danger: style(red), line: style(line), selected: style(ink).Background(lipgloss.Color(selected)), badge: lipgloss.NewStyle().Foreground(lipgloss.Color("#292B2C")).Background(lipgloss.Color("#E3BF73")).Bold(true)}
 }
 func panelFit(s string, width int) string { return ansi.Truncate(s, max(0, width), "") }
 func (m panelModel) body() (string, []int) {

@@ -1,12 +1,12 @@
 id = "herdr.bee"
 name = "Herdr Bee"
-version = "0.3.1"
+version = "0.3.2"
 min_herdr_version = "0.9.0"
 description = "Share selected Herdr sessions with your team through Hive"
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=0.3.1", "-o", "bee", "../cmd/bee"]
+command = ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=0.3.2", "-o", "bee", "../cmd/bee"]
 
 [[startup]]
 command = ["./bee", "restore"]
