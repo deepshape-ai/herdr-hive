@@ -42,15 +42,22 @@ continue to change or restart under the same selected name. Fine ACLs, read-only
 roles and control leases are intentionally absent from this product scope.
 
 Hive hides a device's own publications from the directory and aggregate endpoint, and rejects self-routing.
-Native Herdr's locally saved profiles are owned by Herdr and are not edited by Bee.
+Native Herdr's locally saved profiles are owned by Herdr. Bee invokes the native
+CLI to add/enable a profile; it never edits Herdr's profile files.
 Different keys represent different devices even when they share an IP or hostname.
 
 ## Publication and connection lifecycle
 
-0. Optionally, an administrator issues a token. Bee proves possession of its SSH
+0. An administrator can package the reachable address, persistent public host key
+   and enrollment token into a `hinv1-` invitation. Bee creates/reuses a dedicated
+   device key, verifies the provided host key, enrolls, saves config, then installs
+   a managed OpenSSH Include and invokes native `machine add`. Native setup can
+   resume without the invitation; successful enrollment does not enable sharing.
+   The advanced manual path also accepts a raw token. Bee proves possession of its SSH
    key and redeems the token over a verified short SSH connection before saving
    configuration; Hive reserves usage, then persists the public key.
-1. The owner configures Hive, its verified host key and a local SSH identity file.
+1. The connection uses the same verified Hive host key and device identity for
+   both publication and consumption, whether configured manually or by invitation.
 2. Bee discovers named sessions through the local Herdr CLI. The owner chooses
    running sessions. Selection alone does not enable sharing.
 3. Enabling starts one background publisher. Bee binds the selected API/client

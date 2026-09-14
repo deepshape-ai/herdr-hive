@@ -28,11 +28,12 @@ type panelSnapshot struct {
 	err         error
 	sessionsErr error
 	epoch       int
+	joined      bool
 }
 type panelTick struct{}
 type panelDone struct {
-	err           error
-	update, saved bool
+	err                   error
+	update, saved, joined bool
 }
 type panelClick struct {
 	target, page int
@@ -42,7 +43,7 @@ type panelClick struct {
 type panelModel struct {
 	hive                                                   hiveDirectory
 	readHive                                               hiveReader
-	dirtyFields                                            [4]bool
+	dirtyFields                                            [5]bool
 	ctx                                                    context.Context
 	app                                                    App
 	snapshot                                               panelSnapshot
@@ -51,6 +52,7 @@ type panelModel struct {
 	width, height, page, focus, epoch                      int
 	lastFocus, lastPage, lastHeight                        int
 	ready, refreshing, busy, editing, dirty, dark, restart bool
+	advanced                                               bool
 	message                                                string
 	messageError                                           bool
 	read                                                   func(int) tea.Cmd
@@ -76,15 +78,15 @@ func (a App) TUI(ctx context.Context) error {
 
 func newPanel(ctx context.Context, a App) panelModel {
 	m := panelModel{readHive: publisher.Directory, ctx: ctx, app: a, width: 60, height: 30, viewport: viewport.New()}
-	for _, placeholder := range []string{"hive.example.internal:2222", "Your device name", "/absolute/path/to/hive_device", "hreg-…"} {
+	for _, placeholder := range []string{"hive.example.internal:2222", "Your device name", "/absolute/path/to/hive_device", "hreg-…", "Paste your hinv1- invitation"} {
 		input := textinput.New()
 		input.Prompt = ""
 		input.Placeholder = placeholder
 		input.CharLimit = 4096
-		if placeholder == "hreg-…" {
+		if placeholder == "hreg-…" || strings.HasPrefix(placeholder, "Paste") {
 			input.EchoMode = textinput.EchoPassword
 			input.EchoCharacter = '•'
-			input.CharLimit = 512
+			input.CharLimit = maxInvitation
 		}
 		input.SetVirtualCursor(true)
 		m.fields = append(m.fields, input)
@@ -104,6 +106,7 @@ func newPanel(ctx context.Context, a App) panelModel {
 			if err != nil {
 				s.status.Error = err.Error()
 			}
+			s.joined = connectionComplete(a.Dir, s.config)
 			s.sessions, s.sessionsErr = herdr.Sessions()
 			s.sessions = sessionChoices(s.sessions, s.config.Rules)
 			return s
@@ -113,10 +116,20 @@ func newPanel(ctx context.Context, a App) panelModel {
 		return func() tea.Msg {
 			for _, args := range commands {
 				// Keep token-bearing configure inside this process, out of child argv.
-				if args[0] == "configure" {
+				if args[0] == "configure" || args[0] == "join" {
 					local := a
 					local.Out = io.Discard
-					if err := local.Execute(ctx, args); err != nil {
+					var err error
+					if args[0] == "join" {
+						raw := ""
+						if len(args) > 1 {
+							raw = args[1]
+						}
+						err = local.join(ctx, raw)
+					} else {
+						err = local.Execute(ctx, args)
+					}
+					if err != nil {
 						return panelDone{err: err}
 					}
 					continue
@@ -138,7 +151,7 @@ func newPanel(ctx context.Context, a App) panelModel {
 					return panelDone{err: fmt.Errorf("%s", detail)}
 				}
 			}
-			return panelDone{update: len(commands) == 1 && commands[0][0] == "update", saved: commands[0][0] == "configure" || commands[0][0] == "name"}
+			return panelDone{joined: commands[0][0] == "join", update: len(commands) == 1 && commands[0][0] == "update", saved: commands[0][0] == "join" || commands[0][0] == "configure" || commands[0][0] == "name"}
 		}
 	}
 	return m
@@ -164,6 +177,9 @@ func (m *panelModel) run(commands ...[]string) tea.Cmd {
 	m.busy = true
 	m.epoch++
 	m.message, m.messageError = "Saving changes…", false
+	if commands[0][0] == "join" {
+		m.message = "Joining Hive and connecting Herdr…"
+	}
 	if commands[0][0] == "update" {
 		m.message = "Downloading update. Sharing stays online until activation…"
 	}
@@ -172,7 +188,7 @@ func (m *panelModel) run(commands ...[]string) tea.Cmd {
 func (m *panelModel) syncFields() {
 	c := m.snapshot.config
 	for i, value := range []string{c.Hive, c.Name, c.IdentityFile} {
-		if !m.dirtyFields[i] && !(m.editing && m.focus == i) {
+		if !m.dirtyFields[i] && !(m.editing && m.fieldIndex() == i) {
 			m.fields[i].SetValue(value)
 		}
 	}
@@ -182,6 +198,9 @@ func (m panelModel) itemCount() int {
 		return 1
 	}
 	if m.page == 0 {
+		if !m.advanced {
+			return 4
+		}
 		return 5
 	}
 	return len(m.snapshot.sessions) + 1
@@ -205,9 +224,17 @@ func (m *panelModel) activate() tea.Cmd {
 		return nil
 	}
 	if m.page == 0 {
-		if m.focus < 4 {
+		if !m.advanced && m.focus == 3 {
+			m.advanced = true
+			m.focus = 0
+			return nil
+		}
+		if m.fieldIndex() >= 0 {
 			m.editing = true
-			return m.fields[m.focus].Focus()
+			return m.fields[m.fieldIndex()].Focus()
+		}
+		if !m.advanced {
+			return m.joinFromPanel()
 		}
 		return m.save()
 	}
@@ -228,13 +255,22 @@ func (m *panelModel) activate() tea.Cmd {
 	return m.run([]string{op, name})
 }
 func (m *panelModel) save() tea.Cmd {
-	if m.page != 0 || !m.dirty {
+	if m.page != 0 {
+		return nil
+	}
+	if !m.advanced {
+		if m.fields[4].Value() == "" && m.dirtyFields[1] {
+			return m.run([]string{"name", strings.TrimSpace(m.fields[1].Value())})
+		}
+		return m.joinFromPanel()
+	}
+	if !m.dirty {
 		return nil
 	}
 	c := m.snapshot.config
 	values := []string{}
 	values = []string{c.Hive, c.Name, c.IdentityFile, ""}
-	for i, field := range m.fields {
+	for i, field := range m.fields[:4] {
 		if m.dirtyFields[i] {
 			values[i] = strings.TrimSpace(field.Value())
 		}
@@ -252,7 +288,7 @@ func (m *panelModel) save() tea.Cmd {
 	}
 	if len(commands) == 0 {
 		m.dirty = false
-		m.dirtyFields = [4]bool{}
+		m.dirtyFields = [5]bool{}
 		return nil
 	}
 	return m.run(commands...)
@@ -328,8 +364,12 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message, m.messageError = "Changes saved.", false
 			if msg.saved {
 				m.fields[3].SetValue("")
+				m.fields[4].SetValue("")
 				m.dirty = false
-				m.dirtyFields = [4]bool{}
+				m.dirtyFields = [5]bool{}
+			}
+			if msg.joined {
+				m.message = "Joined Hive. See Hive in the Herdr sidebar."
 			}
 			if msg.update {
 				m.restart = true
@@ -360,7 +400,7 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.editing {
-			m.fields[m.focus].Blur()
+			m.fields[m.fieldIndex()].Blur()
 			m.editing = false
 		}
 		switch msg.target {
@@ -387,21 +427,21 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editing {
 			switch key {
 			case "esc", "enter":
-				m.fields[m.focus].Blur()
+				m.fields[m.fieldIndex()].Blur()
 				m.editing = false
 			case "tab", "shift+tab":
-				m.fields[m.focus].Blur()
+				m.fields[m.fieldIndex()].Blur()
 				delta := 1
 				if key == "shift+tab" {
 					delta = -1
 				}
 				m.move(delta)
-				m.editing = m.focus < 4
+				m.editing = m.fieldIndex() >= 0
 				if m.editing {
-					cmd = m.fields[m.focus].Focus()
+					cmd = m.fields[m.fieldIndex()].Focus()
 				}
 			case "ctrl+s":
-				m.fields[m.focus].Blur()
+				m.fields[m.fieldIndex()].Blur()
 				m.editing = false
 				cmd = m.save()
 			default:
@@ -411,7 +451,12 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "q", "esc":
-			return m, tea.Quit
+			if key == "esc" && m.page == 0 && m.advanced {
+				m.advanced = false
+				m.focus = 0
+			} else {
+				return m, tea.Quit
+			}
 		case "1", "2", "3", "left", "right":
 			if key == "1" {
 				m.page = 0
@@ -446,8 +491,14 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.PageUp()
 		}
 	case tea.PasteMsg:
+		// The invitation is selected on opening: accept a paste immediately,
+		// without requiring an extra Enter or click just to begin editing.
+		if !m.editing && m.ready && !m.busy && m.page == 0 && !m.advanced && m.focus == 0 {
+			m.editing = true
+			cmd = m.fields[4].Focus()
+		}
 		if m.editing {
-			cmd = m.updateField(msg)
+			cmd = tea.Batch(cmd, m.updateField(msg))
 		}
 	default:
 		if m.editing {
@@ -462,12 +513,12 @@ func (m panelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 func (m *panelModel) updateField(msg tea.Msg) tea.Cmd {
-	before := m.fields[m.focus].Value()
-	field, cmd := m.fields[m.focus].Update(msg)
-	m.fields[m.focus] = field
+	before := m.fields[m.fieldIndex()].Value()
+	field, cmd := m.fields[m.fieldIndex()].Update(msg)
+	m.fields[m.fieldIndex()] = field
 	if field.Value() != before {
 		m.dirty = true
-		m.dirtyFields[m.focus] = true
+		m.dirtyFields[m.fieldIndex()] = true
 	}
 	return cmd
 }
@@ -492,4 +543,37 @@ func safePanel(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// Focus is a visible row; advanced settings retain the original field indices.
+func (m panelModel) fieldIndex() int {
+	if m.page != 0 {
+		return -1
+	}
+	if m.advanced {
+		if m.focus < 4 {
+			return m.focus
+		}
+		return -1
+	}
+	if m.focus == 0 {
+		return 4
+	}
+	if m.focus == 1 {
+		return 1
+	}
+	return -1
+}
+func (m *panelModel) joinFromPanel() tea.Cmd {
+	commands := [][]string{{"join", strings.TrimSpace(m.fields[4].Value())}}
+	if m.dirtyFields[1] && strings.TrimSpace(m.fields[1].Value()) != m.snapshot.config.Name {
+		c := m.snapshot.config
+		c.Name = strings.TrimSpace(m.fields[1].Value())
+		if err := c.Validate(); err != nil {
+			m.message, m.messageError = err.Error(), true
+			return nil
+		}
+		commands = append(commands, []string{"name", strings.TrimSpace(m.fields[1].Value())})
+	}
+	return m.run(commands...)
 }

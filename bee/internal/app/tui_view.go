@@ -33,6 +33,9 @@ func (m panelModel) body() (string, []int) {
 	if m.page == 2 {
 		return m.hiveBody(), rows
 	}
+	if m.page == 0 && !m.advanced {
+		return m.joinBody()
+	}
 	if m.page == 0 {
 		add(st.text.Bold(true).Render("Connection"))
 		add(st.muted.Render("Your agent stays on this machine."))
@@ -75,7 +78,7 @@ func (m panelModel) body() (string, []int) {
 			add(st.accent.Render(label))
 		}
 		add("")
-		add(st.muted.Render("Private keys stay on this device."))
+		add(st.muted.Render("Esc returns to Join · private keys stay here."))
 	} else {
 		add(st.text.Bold(true).Render("Shared sessions"))
 		add(st.muted.Render(fmt.Sprintf("%d selected · full access for Hive members", len(m.snapshot.config.Rules))))
@@ -260,7 +263,7 @@ func (m panelModel) View() tea.View {
 		} else if y >= 5 && y < 5+m.viewport.Height() {
 			row := y - 5 + offset
 			for i, start := range rows {
-				if row == start || (m.page == 0 && i < 4 && row == start+1) {
+				if row == start || (m.page == 0 && ((m.advanced && i < 4) || (!m.advanced && i < 2)) && row == start+1) {
 					target = i
 					break
 				}

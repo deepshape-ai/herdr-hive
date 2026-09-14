@@ -48,7 +48,8 @@ func (a App) Execute(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "help", "--help", "-h":
-		fmt.Fprintln(a.Out, `bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH] [--token hreg-…]
+		fmt.Fprintln(a.Out, `bee join [--stdin]  (paste invitation on stdin; no flags resumes a saved connection)
+bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH] [--token hreg-…]
 bee name [NAME]
 bee sessions
 bee share SESSION
@@ -58,6 +59,18 @@ bee update
 bee run | restore
 All noninteractive command results are JSON. Sharing grants full access to the selected named session to registered Hive members.`)
 		return nil
+	case "join":
+		if len(args) == 1 {
+			return a.join(ctx, "")
+		}
+		if len(args) == 2 && args[1] == "--stdin" {
+			b, err := io.ReadAll(io.LimitReader(os.Stdin, maxInvitation+1))
+			if err != nil {
+				return err
+			}
+			return a.join(ctx, string(b))
+		}
+		return errors.New("usage: bee join [--stdin]")
 	case "update":
 		if len(args) != 1 {
 			return errors.New("usage: bee update")

@@ -15,10 +15,10 @@ herdr plugin install deepshape-ai/herdr-hive/bee/plugin
 herdr plugin action invoke configure --plugin herdr.bee
 ```
 
-Use the Connection panel to enter your Hive address, device identity, verified
-host entry and enrollment token. Then select running named sessions in Sharing
-and start sharing. Follow the [registration guide](../../README.md#3-register-with-a-token)
-to prepare the device key and host entry. Installing Bee alone does not deploy Hive.
+Paste the administrator's invitation into the Connection panel and click Join Hive.
+Bee handles device registration, SSH configuration and the native Hive machine.
+Then select running named sessions in Sharing and start sharing. Follow the
+[join guide](../../README.md#3-join-with-an-invitation). Installing Bee alone does not deploy Hive.
 
 For prebuilt binaries without Go, use the [release installer](../../README.md#2-install-bee-inside-herdr).
 It links a local plugin instead of creating a GitHub-managed installation.

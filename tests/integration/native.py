@@ -100,6 +100,43 @@ def main():
     inspect=json.loads(run([install/'hive','inspect','--state-dir',R/'hive','--json']).stdout)
     assert inspect['enroll_enabled'] and inspect['enrolled']==2 and inspect['enroll_rejected']==3
     result['enrollment_idempotency_limits_expiry_revocation_config_atomicity']=True
+    # New-device join uses real enrollment and native machine setup. The Go test
+    # redirects only the SSH config home, never the user's actual ~/.ssh/config.
+    invitation=json.loads(run([install/'hive','enroll','issue','--tokens',tokens,
+                               '--hive',f'127.0.0.1:{port}','--state-dir',R/'hive',
+                               '--max-uses','1']).stdout)
+    (R/'invitation.json').write_text(json.dumps(invitation))
+    join_bin=R/'join-bin';join_bin.mkdir()
+    join_wrapper=join_bin/'ssh'
+    join_config=R/'join-home/.ssh/config'
+    join_wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];out=[]\nwhile a:\n x=a.pop(0)\n if x in ("-F","-S"): a.pop(0)\n else: out.append(x)\nos.execv("/usr/bin/ssh",["ssh","-F",'+repr(str(join_config))+']+out)\n')
+    join_wrapper.chmod(0o700)
+    join_conf=R/'join-native/herdr';join_conf.mkdir(parents=True)
+    (join_conf/'config.toml').write_text('onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n')
+    join_env=dict(BASE,BEE_TEST_JOIN_ROOT=str(R),XDG_CONFIG_HOME=str(R/'join-native'),
+                  XDG_STATE_HOME=str(R/'join-native-state'),PATH=str(join_bin)+os.pathsep+BASE['PATH'])
+    join_test=run(['go','-C',ROOT/'bee','test','./internal/app','-run','^TestNativeInvitationJoin$','-count=1'],join_env,check=False,timeout=120)
+    assert join_test.returncode==0, join_test.stdout+join_test.stderr
+    result['invitation_join_native_machine_resume_revocation_and_empty_hive']=True
+    # Exercise the user-facing paste-and-join path in an actual terminal.
+    ui_invitation=json.loads(run([install/'hive','enroll','issue','--tokens',tokens,
+                                  '--hive',f'127.0.0.1:{port}','--state-dir',R/'hive',
+                                  '--max-uses','1']).stdout)
+    run(['go','-C',ROOT/'bee','test','-c','-o',R/'join-panel.test','./internal/app'],timeout=90)
+    join_ui=pexpect.spawn(str(R/'join-panel.test'),['-test.run','^TestNativeInvitationPanel$'],
+                         env=dict(join_env,TERM='xterm-256color'),encoding='utf-8',timeout=30,dimensions=(32,120))
+    terminals.append(join_ui)
+    join_ui.expect('Invitation')
+    join_ui.send('\x1b[200~'+ui_invitation['invitation']+'\x1b[201~')
+    # Click the visible Join Hive button (zero-based body row 14, column 5).
+    join_ui.send('\x1b[<0;6;15M\x1b[<0;6;15m')
+    join_ui.expect_exact('Joined · Hive is in the Herdr sidebar.')
+    join_ui.send('q');join_ui.expect(pexpect.EOF);join_ui.close()
+    assert join_ui.exitstatus==0
+    result['invitation_native_panel_paste_and_click']=True
+    if '--onboarding-only' in sys.argv:
+        result['passed']=True
+        return
     envs, shares = {}, {}
     for who in 'abc':
         conf = R/who/'herdr'; conf.mkdir()

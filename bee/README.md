@@ -36,23 +36,21 @@ override. No top-level `herdr bee` command is injected.
 
 ## First publication
 
-1. Obtain the Hive address, an enrollment token and a verified host entry from
-   the administrator. Prepare your device key and `~/.ssh/hive_known_hosts` using
-   the [registration steps](../README.md#3-register-with-a-token). Bee does not
-   generate the key or establish host trust automatically. If the key is encrypted,
-   unlock it with `ssh-add`; Bee does not forward your SSH agent.
-2. Register and save the connection settings:
+1. Obtain a `hinv1-` invitation from the administrator. In Bee's Connection
+   panel, paste it into Invitation and click Join Hive. Bee generates a dedicated
+   device key, pins the provided Hive host key, enrolls, and adds the native Hive
+   machine. Joining leaves sharing off on a new device.
+2. For scripts, pass the invitation on standard input, outside process arguments:
 
    ```sh
-   bee configure --hive hive.example.internal:2222 \
-     --token hreg-REPLACE_WITH_YOUR_TOKEN \
-     --identity "$HOME/.ssh/hive_device" \
-     --known-hosts "$HOME/.ssh/hive_known_hosts"
+   bee join --stdin < /secure/path/invitation.txt
    ```
 
-   This requires Hive v0.2.0 or later with enrollment enabled. Registration runs
-   before settings are saved; failure leaves the configuration unchanged. The
-   token is never saved to `config.json`; later connections use your device key.
+   The input is the invitation value alone, not the administrator's entire JSON
+   response. After successful registration, `bee join` without flags resumes or
+   repairs native connection setup using the saved identity, even if the invitation
+   has expired. The invitation/token is never saved. Manual `configure` remains
+   available under Advanced settings; see the [manual path](../README.md#manual-registration-advanced).
 3. Set a name, list running sessions, then choose one and start sharing:
 
    ```sh
@@ -78,7 +76,7 @@ continues retrying. Use `status` to distinguish saved intent from live connectiv
 changing share IDs. One device identity should belong to one Bee instance; a
 second concurrent publisher using that identity is rejected.
 
-The Connection panel also accepts a masked enrollment token and clears it after
+The Advanced settings panel also accepts a masked enrollment token and clears it after
 saving. It uses `~/.ssh/known_hosts` by default, or the custom file already saved
 by `configure`. You can omit the token when the device key is already authorized.
 
@@ -247,3 +245,26 @@ terminal controller is never displaced: a conflicting remote view disconnects
 and Bee logs the reason. After the controller is released, reconnect the view.
 A live pane losing its sizing helper also disconnects affected viewers; ordinary
 pane closure releases that pane without ending the rest of the session.
+
+## Managed connection files
+
+The Bee config directory holds `device_key` (a generated Ed25519 private key with
+mode 0600), verified `hive-*.known_hosts`, `ssh_config`, per-target `ssh-connections/*.conf` and `joined.json` (native
+setup completion metadata, no credentials). Existing configured identities are
+reused. The generated key is unencrypted for unattended local connections and
+never leaves the device.
+
+Bee prepends an Include for its own SSH file to `~/.ssh/config`, retaining existing
+content and following symlinked dotfiles. Native profiles are created/enabled via
+Herdr CLI, never by editing Herdr's profile storage. Repeated joins reuse the
+managed target, or a manually added profile resolving to the same address, device
+identity and verified host file. Profiles with multiple identities or explicit certificates
+are not reused. Prior managed targets stay available when switching Hive. Joining another Hive requires stopping sharing and clearing the
+previous session selection first. Existing connections refuse an invitation with
+a different host key until the operator verifies and updates the saved trust.
+
+Registration and native setup are separate checkpoints: failed registration leaves
+connection settings unchanged but retains the generated key for retry. A failed
+native setup leaves the registered connection usable through `bee join`. Removal
+can use `herdr machine remove` plus removal of Bee's Include line; device credentials
+remain registered at Hive until the administrator revokes the device.

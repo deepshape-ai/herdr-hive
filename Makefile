@@ -24,11 +24,11 @@ package: package-hive package-bee
 package-hive: build-hive
 	mkdir -p dist/packages/hive-$(GOOS)-$(GOARCH)
 	cp dist/hive hive/README.md LICENSE dist/packages/hive-$(GOOS)-$(GOARCH)/
-	cd dist/packages && tar -czf ../hive-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz hive-$(GOOS)-$(GOARCH)
+	cd dist/packages && COPYFILE_DISABLE=1 tar -czf ../hive-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz hive-$(GOOS)-$(GOARCH)
 package-bee: build-bee
 	mkdir -p dist/packages/bee-$(GOOS)-$(GOARCH)
 	cp dist/bee bee/README.md LICENSE dist/packages/bee-$(GOOS)-$(GOARCH)/
 	sed 's/^version = ".*"/version = "$(VERSION)"/' bee/plugin/herdr-plugin.toml > dist/packages/bee-$(GOOS)-$(GOARCH)/herdr-plugin.toml
-	cd dist/packages && tar -czf ../bee-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz bee-$(GOOS)-$(GOARCH)
+	cd dist/packages && COPYFILE_DISABLE=1 tar -czf ../bee-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz bee-$(GOOS)-$(GOARCH)
 clean:
 	rm -rf dist

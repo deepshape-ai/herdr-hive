@@ -20,6 +20,7 @@ import (
 func readyPanel() panelModel {
 	m := newPanel(context.Background(), App{Version: "test"})
 	m.ready = true
+	m.advanced = true
 	m.snapshot = panelSnapshot{config: config.Config{Name: "Design workstation", Hive: "hive.example.internal:2222", IdentityFile: "/home/member/.ssh/hive_device", KnownHosts: "/home/member/.ssh/known_hosts"}, sessions: []herdr.Session{{Name: "project-api", Running: true}, {Name: "design-review", Running: true}}}
 	m.syncFields()
 	m.layout()
@@ -252,7 +253,7 @@ func TestPanelSmallViewportKeepsSelectedSessionVisible(t *testing.T) {
 
 func TestPanelOmitsKnownHostsControl(t *testing.T) {
 	m := readyPanel()
-	if len(m.fields) != 4 || m.itemCount() != 5 {
+	if len(m.fields) != 5 || m.itemCount() != 5 {
 		t.Fatal("unexpected connection controls")
 	}
 	if strings.Contains(m.View().Content, "known_hosts") {
@@ -262,6 +263,7 @@ func TestPanelOmitsKnownHostsControl(t *testing.T) {
 
 func TestEnrollmentTokenMaskedAndSavedAlone(t *testing.T) {
 	m := newPanel(context.Background(), App{})
+	m.advanced = true
 	m.ready = true
 	m.snapshot.config = config.Config{Hive: "host:2222", Name: "Device", IdentityFile: "/key"}
 	m.syncFields()

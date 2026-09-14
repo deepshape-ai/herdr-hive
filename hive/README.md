@@ -96,9 +96,31 @@ writes roll back the new reservation. A crash may leave a reservation; retrying
 the same key resumes it without another use. Back up both files with the host
 key and names registry. Do not delete usage state to reset an active token's limit.
 
+## Invitations
+
+After Hive has initialized its persistent host key, issue a pasteable invitation:
+
+```sh
+hive enroll issue --tokens ./authorized_tokens --state-dir ./state \
+  --hive hive.example.internal:2222 --label onboarding
+```
+
+Send only the JSON `invitation` value to the member through a trusted channel.
+Bee's Join Hive field consumes it and handles the device key, host trust,
+registration and native machine setup. No new server endpoint is required;
+invitation redemption uses the existing enrollment protocol. The `--hive` address
+must be reachable by members, not a wildcard listen address. Existing `--ttl` and
+`--max-uses` options apply to the invitation's embedded token. The usual `secret`
+field remains available for older clients.
+
+An invitation is a credential: its base64 encoding is not encryption. The member
+trusts its bundled host key through the administrator's delivery channel. Hive
+stores only the underlying token hash. Revoking/expiring an invitation prevents
+new registrations; already enrolled devices can reconnect without redeeming it.
+
 ## Connection details for new members
 
-Send these three items through a trusted channel:
+For advanced manual registration, send these three items through a trusted channel:
 
 1. The reachable Hive address, such as `hive.example.internal:2222`.
 2. The `hreg-…` secret printed by `enroll issue`.
@@ -118,7 +140,7 @@ ssh-keygen -lf ./hive_known_hosts
 Send `hive_known_hosts` to members and have them save it to
 `~/.ssh/hive_known_hosts`. The file contains only the public host key; keep
 `state/host_key` private. For a custom or systemd installation, use the actual
-state directory and port. Members follow the [Bee registration steps](../README.md#3-register-with-a-token).
+state directory and port. Members follow the [Bee registration steps](../README.md#manual-registration-advanced).
 
 ## Inspect
 
@@ -136,6 +158,9 @@ direction. Runtime allocation is **not OS RSS**. Counters reset when a publicati
 or Hive restarts; no history database or terminal preview is maintained.
 
 ## Native consumer setup
+
+Invitation onboarding runs these steps automatically. The following is the manual
+advanced equivalent.
 
 Use the same dedicated device key for publishing and consuming. Configure one
 SSH alias using the `hive` application user:

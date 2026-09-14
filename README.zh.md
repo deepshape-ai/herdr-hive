@@ -25,16 +25,22 @@
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- hive
 cd "$HOME/.local/share/herdr-hive"
 touch authorized_keys
-./hive enroll issue --tokens ./authorized_tokens --label onboarding
+test -e authorized_tokens || printf '[]\n' > authorized_tokens
 ./hive --listen 0.0.0.0:2222 \
   --state-dir "$PWD/state" \
   --authorized-keys "$PWD/authorized_keys" \
   --authorized-tokens "$PWD/authorized_tokens"
 ```
 
-`enroll issue` 输出 JSON，其中 `secret` 是以 `hreg-` 开头的 token，默认无限期、不限使用次数。保持 Hive 进程运行，并让成员能够访问端口 2222。
+保持 Hive 运行，并让成员能够访问端口 2222。在另一个终端生成邀请，地址填写成员能访问的地址：
 
-通过可信渠道向成员提供 Hive 地址、token 和已核验的 `known_hosts` 条目，具体见[导出主机公钥条目](hive/README.md#connection-details-for-new-members)。成员使用 token 接入时，设备公钥会自动注册。[常驻服务、令牌限额与撤销](hive/README.md)。
+```sh
+cd "$HOME/.local/share/herdr-hive"
+./hive enroll issue --tokens ./authorized_tokens --state-dir ./state \
+  --hive hive.example.internal:2222 --label onboarding
+```
+
+通过可信渠道向成员发送输出中 `invitation` 的值（以 `hinv1-` 开头）。它已经包含地址、主机公钥和注册 token，成员只需粘贴一次。默认无限期、不限设备数；仍可通过 `--ttl`、`--max-uses` 设置限额。[常驻服务与邀请撤销](hive/README.md)。
 
 ### 2. 在 Herdr 中安装 Bee
 
@@ -53,10 +59,44 @@ herdr plugin install deepshape-ai/herdr-hive/bee/plugin
 herdr plugin action invoke configure --plugin herdr.bee
 ```
 
-采用此托管安装方式时，在第 3 步准备好密钥和主机公钥条目后，通过 Bee 面板完成连接配置。
+安装后按第 3 步在 Bee 面板加入 Hive。
 更新与卸载见[插件安装指南](bee/plugin/README.md)。
 
-### 3. 使用 token 注册
+### 3. 粘贴邀请，加入 Hive
+
+从 Herdr 的插件操作打开 Bee，或执行：
+
+```sh
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+把管理员提供的邀请码粘贴到 **Invitation**，点击 **Join Hive**。
+Bee 自动生成专用设备密钥、核验 Hive、注册设备，并将 **Hive** 添加到 Herdr 侧栏，无需手写 SSH 配置。邀请码以掩码显示，注册后不保存。
+
+如果注册后连接步骤中断，点击 **Finish connection** 即可继续，无需新邀请。已经手动配置过 Bee 的设备也可以点击这个按钮补齐接收端。加入 Hive 不会自动开启自己的共享。
+
+### 4. 选择会话并开始共享
+
+```sh
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+1. 在 **[1] Connection** 中按需修改可见名称，Ctrl+S 保存。
+2. 在 **[2] Sharing** 中选择已经运行的 named session，例如 `default`。
+3. 选择 **Start sharing**，确认顶部显示 **Connected**。
+
+一个 named session 包含自己的工作区、pane 和 agent。关闭 Bee 面板不会停止共享。脚本接入见 [Bee CLI 步骤](bee/README.md#first-publication)。
+
+### 5. 访问其他成员的共享
+
+在 Herdr 侧栏选择 **Hive**。第 3 步已经完成接收端配置，无需再执行 `machine add`。
+
+共享工作区显示为 `[Bee name/session] workspace`；默认 session 简写为 `[Bee name] workspace`。自己的共享会自动隐藏。暂时没有其他在线共享时，Hive 为空是正常状态，不是接入失败。只查看他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
+
+<details>
+<summary>高级用法：已有密钥与原始注册 token</summary>
+
+### 手动注册（高级用法）
 
 如果还没有专用设备密钥，先创建：
 
@@ -77,54 +117,10 @@ ssh-keygen -t ed25519 -f "$HOME/.ssh/hive_device"
   --known-hosts "$HOME/.ssh/hive_known_hosts"
 ```
 
-成功后，设备完成注册并保存连接设置。token 不会保存，后续连接使用设备密钥。**当前 Bee 仍需手工准备密钥和已核验的主机公钥条目，仅有地址和 token 还不够。**
+成功后，设备完成注册并保存连接设置。token 不会保存，后续连接使用设备密钥。这条高级路径需要手工准备密钥和已核验的主机公钥条目。随后执行 `bee join`，即可自动添加 Herdr 接收端 machine。
 
-### 4. 选择会话并开始共享
 
-```sh
-herdr plugin action invoke configure --plugin herdr.bee
-```
-
-1. 在 **[1] Connection** 中按需修改可见名称，Ctrl+S 保存。
-2. 在 **[2] Sharing** 中选择已经运行的 named session，例如 `default`。
-3. 选择 **Start sharing**，确认顶部显示 **Connected**。
-
-一个 named session 包含自己的工作区、pane 和 agent。关闭 Bee 面板不会停止共享。脚本接入见 [Bee CLI 步骤](bee/README.md#first-publication)。
-
-### 5. 访问其他成员的共享
-
-**每台需要查看共享工作区的设备都要执行这一步，包括已经通过 Bee 分享的设备。**
-Bee 显示 Connected 只说明发布端已连接 Hive，不会自动给 Herdr 添加接收端 machine。
-
-本机完成第 3 步注册后，将下面的配置加入 `~/.ssh/config`，把示例主机名替换为你的 Hive 主机名。
-使用与 Bee 相同的设备密钥和已核验的主机公钥文件，并把此配置块放在通用 `Host *` 默认配置之前：
-
-```sshconfig
-Host hive
-    HostName hive.example.internal
-    Port 2222
-    User hive
-    IdentityFile ~/.ssh/hive_device
-    UserKnownHostsFile ~/.ssh/hive_known_hosts
-    IdentitiesOnly yes
-    StrictHostKeyChecking yes
-```
-
-```sh
-ssh -o BatchMode=yes hive 'list --json'
-herdr machine add hive --label Hive
-herdr machine list
-```
-
-第一条命令会列出其他设备的在线共享，并验证 SSH 身份和连接。`machine add` 提示远端服务就绪后，
-已打开的 Herdr 客户端会自动连接，在侧栏找到 **Hive** machine 即可。每台接收设备只需添加一次。
-
-Herdr 会自动展示共享工作区，名称为 `[Bee name/session] workspace`，例如 `[Alice/research] xxx`；默认 session 简写为 `[Alice] xxx`。使用同一设备密钥会隐藏自己发布的共享。只访问他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
-
-如果两台 Bee 都显示 Connected，但 Herdr 看不到共享，先检查 `herdr machine list`。
-列表为空说明尚未添加接收端。`hive inspect` 中共享会话的 `connections=0` 表示当前没有消费者访问，
-不表示 Bee 发布失败。若 `ssh hive 'list --json'` 返回空列表，说明当前没有其他设备发布可见会话；
-自己发布的会话会按设计隐藏。
+</details>
 
 ## 更新
 

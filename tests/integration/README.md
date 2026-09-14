@@ -57,3 +57,15 @@ not physical display latency. Keep real host addresses, keys and raw terminal
 captures out of recorded/public test results. The relay backpressure/capacity test
 is implemented separately in `hive/internal/server/server_test.go` and runs under
 the Go race detector through `make test`.
+
+Invitation onboarding is covered by `native.py`: an isolated new device consumes an
+invitation issued by the real Hive CLI, resumes after interrupted machine setup
+and token revocation, joins an empty Hive, reuses its key and machine, and enables
+a previously disabled machine, reuses an equivalent manually configured Hive,
+and exercises pasting and clicking Join in a real terminal. The fixture redirects the SSH home lookup and
+OpenSSH config to temporary files while using the real Herdr CLI and SSH transport.
+Panel acceptance starts on the invitation view; unit tests verify masking and
+submission plus malformed invitations, trust changes and configuration preservation.
+
+To run only the enrollment/join acceptance (including the actual panel click), use
+`.local/venv/bin/python tests/integration/native.py --onboarding-only`.

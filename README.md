@@ -29,20 +29,26 @@ Administrator only. If Hive is already running, start at step 2.
 curl -fsSL https://raw.githubusercontent.com/deepshape-ai/herdr-hive/main/install.sh | sh -s -- hive
 cd "$HOME/.local/share/herdr-hive"
 touch authorized_keys
-./hive enroll issue --tokens ./authorized_tokens --label onboarding
+test -e authorized_tokens || printf '[]\n' > authorized_tokens
 ./hive --listen 0.0.0.0:2222 \
   --state-dir "$PWD/state" \
   --authorized-keys "$PWD/authorized_keys" \
   --authorized-tokens "$PWD/authorized_tokens"
 ```
 
-`enroll issue` prints a JSON `secret` beginning with `hreg-`. By default it never
-expires and has unlimited uses. Keep Hive running and make port 2222 reachable.
+Keep Hive running and make port 2222 reachable. In another terminal, create an
+invitation using the address members can reach:
 
-Give members the Hive address, token and verified `known_hosts` entry through a
-trusted channel. See [how to export the host entry](hive/README.md#connection-details-for-new-members).
-Device public keys are registered automatically when members redeem the token.
-[Service setup, token limits and revocation](hive/README.md).
+```sh
+cd "$HOME/.local/share/herdr-hive"
+./hive enroll issue --tokens ./authorized_tokens --state-dir ./state \
+  --hive hive.example.internal:2222 --label onboarding
+```
+
+Send the JSON `invitation` value (starting with `hinv1-`) through a trusted channel.
+It packages the address, public host key and enrollment token into one paste.
+Default invitations never expire and allow unlimited devices; `--ttl` and
+`--max-uses` retain their existing meanings. [Service setup and revocation](hive/README.md).
 
 ### 2. Install Bee inside Herdr
 
@@ -63,11 +69,51 @@ herdr plugin install deepshape-ai/herdr-hive/bee/plugin
 herdr plugin action invoke configure --plugin herdr.bee
 ```
 
-For this managed installation, use the Bee panel to configure the connection
-after preparing the key and host entry in step 3. See the
+Use the Bee panel to join in step 3. See the
 [plugin installation guide](bee/plugin/README.md) for updates and removal.
 
-### 3. Register with a token
+### 3. Join with an invitation
+
+Open Bee from Herdr's plugin actions, or run:
+
+```sh
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+Paste the administrator's invitation into **Invitation** and click **Join Hive**.
+Bee creates a private device key, verifies Hive using the invitation's public key,
+registers the device, and adds **Hive** to the Herdr sidebar. No manual SSH files
+or machine command are needed. The invitation is masked and is not saved.
+
+If native setup is interrupted after registration, click **Finish connection**;
+no new invitation is needed. Existing manually configured devices can use the
+same button. Joining does not turn on sharing.
+
+### 4. Choose sessions and start sharing
+
+```sh
+herdr plugin action invoke configure --plugin herdr.bee
+```
+
+1. In **[1] Connection**, optionally change your visible name and save with Ctrl+S.
+2. In **[2] Sharing**, select an existing running named session, such as `default`.
+3. Choose **Start sharing**. Confirm the header shows **Connected**.
+
+A named session contains its own workspaces, panes and agents. Closing the Bee
+panel leaves sharing running. For scripts, see the [Bee CLI steps](bee/README.md#first-publication).
+
+### 5. View other members' sharing
+
+Choose **Hive** in Herdr's sidebar. Joining in step 3 already added this machine.
+Workspaces appear as `[Bee name/session] workspace`; the default session is
+shortened to `[Bee name] workspace`. Your own device's publications are hidden.
+No other online shares is a valid empty Hive, not a failed join. Devices that only
+view others can skip step 4. [Gateway limits](hive/README.md#native-consumer-setup).
+
+<details>
+<summary>Advanced: existing keys and raw enrollment tokens</summary>
+
+### Manual registration (advanced)
 
 First create a dedicated device key, unless you already have one:
 
@@ -92,65 +138,11 @@ Replace the example address and token with the administrator's values:
 ```
 
 Success registers the device and saves its connection settings. The token is not
-saved; later connections use the device key. **The current Bee still requires
-this key and a verified host entry. Address and token alone are not enough.**
+saved; later connections use the device key. This advanced path requires the device key and verified host entry. Run
+`bee join` afterwards to add the native receiving machine automatically.
 
-### 4. Choose sessions and start sharing
 
-```sh
-herdr plugin action invoke configure --plugin herdr.bee
-```
-
-1. In **[1] Connection**, optionally change your visible name and save with Ctrl+S.
-2. In **[2] Sharing**, select an existing running named session, such as `default`.
-3. Choose **Start sharing**. Confirm the header shows **Connected**.
-
-A named session contains its own workspaces, panes and agents. Closing the Bee
-panel leaves sharing running. For scripts, see the [Bee CLI steps](bee/README.md#first-publication).
-
-### 5. View other members' sharing
-
-**Do this on every device that needs to view shared workspaces, including devices
-already publishing with Bee.** Bee's Connected status confirms publication to
-Hive; it does not add a receiving machine to Herdr.
-
-After registering this device in step 3, add the following to `~/.ssh/config`,
-replacing the example host with your Hive host. Use the same identity and verified
-host file configured in Bee. Place this block before any broad `Host *` defaults:
-
-```sshconfig
-Host hive
-    HostName hive.example.internal
-    Port 2222
-    User hive
-    IdentityFile ~/.ssh/hive_device
-    UserKnownHostsFile ~/.ssh/hive_known_hosts
-    IdentitiesOnly yes
-    StrictHostKeyChecking yes
-```
-
-```sh
-ssh -o BatchMode=yes hive 'list --json'
-herdr machine add hive --label Hive
-herdr machine list
-```
-
-The SSH command lists other devices' online shares and verifies authentication
-before adding the machine. After `machine add` reports that the remote server is
-ready, open Herdr clients connect automatically; look for the **Hive** machine
-in the sidebar. Add the machine once per receiving device.
-
-Herdr automatically shows shared workspaces as `[Bee name/session] workspace`,
-for example `[Alice/research] xxx`. The default session is shortened to
-`[Alice] xxx`. Using the same device key hides your own sharing. A device that only views others can skip step 4.
-[Gateway limits and direct-session access](hive/README.md#native-consumer-setup).
-
-If both Bees show Connected but no shared workspaces appear, check
-`herdr machine list` first. An empty list means the receiving machine has not
-been added. In `hive inspect`, a published session with `connections=0` has no
-active consumers; that counter does not mean the Bee failed to publish. An empty
-`ssh hive 'list --json'` result means no other device is currently publishing a
-visible session; your own publications are intentionally hidden.
+</details>
 
 ## Update
 
