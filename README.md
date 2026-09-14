@@ -1,5 +1,7 @@
 # Herdr Hive
 
+![Herdr Hive — share selected sessions with your team while agents keep running on their owners' hosts.](docs/assets/herdr-hive-banner.png)
+
 [English](README.md) | [简体中文](README.zh.md)
 
 Share Herdr sessions with your team. Agents keep running on their owners' hosts;

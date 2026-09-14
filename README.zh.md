@@ -1,5 +1,7 @@
 # Herdr Hive
 
+![Herdr Hive：与团队共享选定会话，Agent 继续在各自所有者的主机上运行。](docs/assets/herdr-hive-banner.png)
+
 [English](README.md) | [简体中文](README.zh.md)
 
 与团队共享 Herdr 会话。Agent 继续在所有者的主机上运行，其他成员通过一个原生 Herdr machine 访问共享工作区。
