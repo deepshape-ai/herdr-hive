@@ -262,11 +262,16 @@ Hive if existing transports for that key must be terminated immediately.
 
 ### Aggregate gateway limits
 
-The aggregate endpoint accepts two concurrent viewers, each opening at most eight
+The aggregate endpoint accepts eight concurrent viewers, each opening at most eight
 visible sessions in stable share-ID order. If more sessions are published, a
 configuration notice explains the limit; the direct sharing-ID path remains
 available. These limits are independent of the existing SSH/channel budgets.
 `hive inspect --json` includes `gateway_viewers` and `max_gateway_viewers`.
+Each Herdr window consumes a viewer slot; `herdr machine add` also needs a slot
+temporarily to verify the native connection. This is a service-wide connection
+limit, not a limit on registered Bees or people. Multiple windows from one device
+count separately. At capacity, a new connection is rejected without displacing
+existing viewers.
 
 Background connections subscribe to session metadata without taking terminal
 size control. Only the shared session currently visible in the viewer receives

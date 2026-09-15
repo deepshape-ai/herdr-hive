@@ -25,6 +25,10 @@ import (
 )
 
 const maxControl = 64 << 10
+
+// Herdr windows and transient machine-add checks each use one aggregate slot.
+// Leave room for a small team while retaining a separate bounded memory budget.
+const maxGatewayViewers = 8
 const streamChannel = "bee-stream-v1"
 
 type Share struct {
@@ -73,7 +77,7 @@ type Server struct {
 }
 
 func New(r *registry.Registry, keys string) *Server {
-	return &Server{gatewaySlots: make(chan struct{}, 2), enrollSlots: make(chan struct{}, 4), Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
+	return &Server{gatewaySlots: make(chan struct{}, maxGatewayViewers), enrollSlots: make(chan struct{}, 4), Registry: r, AuthorizedKeys: keys, shares: map[string]*binding{}, owners: map[string]*ssh.ServerConn{}, conns: map[net.Conn]bool{}, sem: make(chan struct{}, 64), channels: make(chan struct{}, 16), started: time.Now(), operationTimeout: 10 * time.Second}
 }
 func (s *Server) auth(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	if _, certificate := key.(*ssh.Certificate); certificate {
