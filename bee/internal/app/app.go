@@ -211,9 +211,11 @@ Noninteractive commands return JSON; bee on preserves native Herdr output and ex
 			found := false
 			for _, s := range sessions {
 				if s.Name == args[1] && s.Running {
-					if _, e = herdr.Bind(s); e != nil {
+					bound, e := herdr.Bind(s)
+					if e != nil {
 						return e
 					}
+					bound.Close()
 					found = true
 				}
 			}

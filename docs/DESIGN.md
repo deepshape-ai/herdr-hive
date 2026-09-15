@@ -85,6 +85,8 @@ Different keys represent different devices even when they share an IP or hostnam
 
 A saved manual rule deliberately identifies a named session, not an agent PID.
 Within a connected publication, changed socket identities reject new streams.
+Linux publications retain path descriptors for both socket inodes until all
+streams have closed, preventing unlink/rebind from reusing an old inode identity.
 Refresh publication after a local server replacement. Bytes already written into
 Herdr or terminal buffers cannot be recalled. Configuration changes currently
 reconnect the entire Bee publication, favoring simple ownership over partial updates.

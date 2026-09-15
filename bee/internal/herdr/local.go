@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,15 @@ type Bound struct {
 	clientPath          string
 	apiInfo, clientInfo os.FileInfo
 	sizing              *Sizing
+	lifetime            *boundLifetime
+}
+
+// Bound values are copied into handlers and sizing helpers. They share one
+// lifetime so closing any copy releases each endpoint pin exactly once.
+type boundLifetime struct {
+	sync.RWMutex
+	closed bool
+	pins   []*os.File
 }
 
 func binary() string {
@@ -65,35 +75,75 @@ func Sessions() ([]Session, error) {
 	e = json.Unmarshal(b, &list)
 	return list.Sessions, e
 }
-func Bind(s Session) (Bound, error) {
-	b := Bound{Session: s}
+func Bind(s Session) (b Bound, err error) {
+	b = Bound{Session: s, lifetime: &boundLifetime{}}
+	defer func() {
+		if err != nil {
+			b.Close()
+		}
+	}()
 	if !s.Running || !filepath.IsAbs(s.Socket) {
 		return b, errors.New("session is not running")
 	}
 	ext := filepath.Ext(s.Socket)
 	b.clientPath = strings.TrimSuffix(s.Socket, ext) + "-client" + ext
-	var e error
-	b.apiInfo, e = os.Stat(s.Socket)
-	if e != nil {
-		return b, e
-	}
-	b.clientInfo, e = os.Stat(b.clientPath)
-	if e != nil {
-		return b, e
+	for _, endpoint := range []struct {
+		path string
+		info *os.FileInfo
+	}{{s.Socket, &b.apiInfo}, {b.clientPath, &b.clientInfo}} {
+		info, pin, e := pinEndpoint(endpoint.path)
+		if e != nil {
+			return b, e
+		}
+		*endpoint.info = info
+		if pin != nil {
+			b.lifetime.pins = append(b.lifetime.pins, pin)
+		}
 	}
 	if b.apiInfo.Mode()&os.ModeSocket == 0 || b.clientInfo.Mode()&os.ModeSocket == 0 {
 		return b, errors.New("Herdr endpoints must be Unix sockets")
 	}
+	// Pinning and path lookup are separate operations. Reject replacements
+	// that happened while the two endpoint identities were being collected.
+	if err := b.Check(); err != nil {
+		return b, err
+	}
 	b.sizing = &Sizing{bound: b, locks: map[string]*sizeLock{}}
 	return b, nil
 }
+
+// Close releases the publication's endpoint pins. It is safe on copied Bound
+// values and repeated calls. The owner must close after its handlers finish.
+func (b Bound) Close() {
+	if b.lifetime == nil {
+		return
+	}
+	b.lifetime.Lock()
+	defer b.lifetime.Unlock()
+	if b.lifetime.closed {
+		return
+	}
+	b.lifetime.closed = true
+	for _, pin := range b.lifetime.pins {
+		pin.Close()
+	}
+}
+
 func (b Bound) Check() error {
+	if b.lifetime == nil {
+		return errors.New("session binding is closed")
+	}
+	b.lifetime.RLock()
+	defer b.lifetime.RUnlock()
+	if b.lifetime.closed {
+		return errors.New("session binding is closed")
+	}
 	for path, old := range map[string]os.FileInfo{b.Socket: b.apiInfo, b.clientPath: b.clientInfo} {
 		now, e := os.Stat(path)
 		if e != nil {
 			return e
 		}
-		if !os.SameFile(old, now) {
+		if !os.SameFile(old, now) || !old.ModTime().Equal(now.ModTime()) {
 			return errors.New("session endpoint replaced; refresh publication")
 		}
 	}

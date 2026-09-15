@@ -133,6 +133,9 @@ func connect(ctx context.Context, c config.Config, state *State) error {
 		if e != nil {
 			return fmt.Errorf("session %q: %w", r.Session, e)
 		}
+		// Registered before stream teardown defers: pins outlive all handlers,
+		// and also close if a later session binding or SSH setup fails.
+		defer b.Close()
 		bound[r.Key] = b
 		shares = append(shares, Share{Key: r.Key, Label: r.Session, API: true})
 	}

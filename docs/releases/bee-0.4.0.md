@@ -7,6 +7,8 @@ Bee v0.4.0 lets agents manage agents and panes on other Bees through Hive.
   automatic setup of the Hive connection in Herdr.
 - Shared terminals keep a stable size while remote tabs are open, preventing
   repeated resizing when viewers use different window sizes.
+- Rapid Linux session restarts now invalidate the old publication, preventing
+  remote operations from reaching the replacement session.
 
 Compatibility: unmodified Herdr 0.9.0; remote commands require Hive 0.4.0 and
 Bee 0.4.0 on both devices, with the target session shared by its owner.

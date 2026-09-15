@@ -35,6 +35,7 @@ func apiFixture(t *testing.T) (Bound, net.Listener) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(b.Close)
 	return b, l
 }
 
