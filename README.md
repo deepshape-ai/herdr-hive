@@ -102,6 +102,11 @@ herdr plugin action invoke configure --plugin herdr.bee
 A named session contains its own workspaces, panes and agents. Closing the Bee
 panel leaves sharing running. For scripts, see the [Bee CLI steps](bee/README.md#first-publication).
 
+Agents can use `bee targets` to discover other Bees and
+`bee on B/research -- herdr agent list` to run the native Herdr CLI in one shared
+session. The same entrypoint supports creating agents, submitting prompts and
+managing panes, tabs and workspaces. See [remote agent automation](bee/README.md#remote-agent-automation).
+
 ### 5. View other members' sharing
 
 Choose **Hive** in Herdr's sidebar. Joining in step 3 already added this machine.

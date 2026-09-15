@@ -52,13 +52,48 @@ func (a App) Execute(ctx context.Context, args []string) error {
 bee configure --hive HOST:PORT --identity PATH [--known-hosts PATH] [--token hreg-…]
 bee name [NAME]
 bee sessions
+bee targets
+bee on BEE/SESSION|SHARE_ID -- herdr COMMAND ...
 bee share SESSION
 bee unshare SESSION
 bee enable | disable | status | tui | open
 bee update
 bee run | restore
-All noninteractive command results are JSON. Sharing grants full access to the selected named session to registered Hive members.`)
+Noninteractive commands return JSON; bee on preserves native Herdr output and exit status. Sharing grants full access to the selected named session to registered Hive members.`)
 		return nil
+	case "targets":
+		if len(args) != 1 {
+			return errors.New("usage: bee targets")
+		}
+		c, err := config.Load(a.Dir)
+		if err != nil {
+			return err
+		}
+		shares, err := publisher.Directory(ctx, c)
+		if err != nil {
+			return err
+		}
+		return a.emit(shares)
+	case "on":
+		if len(args) < 6 || args[2] != "--" {
+			return errors.New("usage: bee on BEE/SESSION|SHARE_ID -- herdr COMMAND ...")
+		}
+		if err := herdr.ValidateRemoteCommand(args[3:]); err != nil {
+			return err
+		}
+		c, err := config.Load(a.Dir)
+		if err != nil {
+			return err
+		}
+		shares, err := publisher.Directory(ctx, c)
+		if err != nil {
+			return err
+		}
+		target, err := publisher.ResolveTarget(shares, args[1])
+		if err != nil {
+			return err
+		}
+		return publisher.RemoteHerdr(ctx, c, target, args[3:], os.Stdin, a.Out, os.Stderr)
 	case "join":
 		if len(args) == 1 {
 			return a.join(ctx, "")

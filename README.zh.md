@@ -93,6 +93,23 @@ herdr plugin action invoke configure --plugin herdr.bee
 
 共享工作区显示为 `[Bee name/session] workspace`；默认 session 简写为 `[Bee name] workspace`。自己的共享会自动隐藏。暂时没有其他在线共享时，Hive 为空是正常状态，不是接入失败。只查看他人共享的设备可以跳过第 4 步。[聚合限制和单会话直连](hive/README.md#native-consumer-setup)。
 
+### Agent 跨 Bee 操作
+
+Hive 与发布端 Bee 支持 API 后，所有已加入的 Bee 都能操作其他 Bee 已共享的 session：
+
+```sh
+bee targets
+bee on B/research -- herdr agent list
+bee on B/research -- herdr workspace list
+bee on B/research -- herdr agent prompt reviewer "检查当前改动" --wait --timeout 120000
+```
+
+`B/research` 表示名为 B 的 Bee 共享的 research session，也可使用列表返回的稳定 `id`。
+原生 Herdr 指令、输出和退出码保持不变；创建 agent、分屏、移动面板等操作真实发生在目标 Bee。
+每次命令独立绑定目标，支持并发操作不同 Bee。使用目标返回的面板 ID 和目标主机的绝对目录，
+不要带本机的 `--current` 或 `--session`。断线后先检查目标状态，避免重复创建或提交任务。
+详见[创建 agent 与面板管理](bee/README.md#remote-agent-automation)。
+
 <details>
 <summary>高级用法：已有密钥与原始注册 token</summary>
 

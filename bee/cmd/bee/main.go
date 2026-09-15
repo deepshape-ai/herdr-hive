@@ -32,6 +32,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if e := (app.App{Dir: config.Dir(), Out: os.Stdout, Version: version, Executable: exe}).Execute(ctx, os.Args[1:]); e != nil {
+		var child *publisher.RemoteExitError
+		if errors.As(e, &child) {
+			os.Exit(child.Code)
+		}
 		if errors.Is(e, publisher.ErrRestart) {
 			stop()
 			e = syscall.Exec(exe, os.Args, os.Environ())

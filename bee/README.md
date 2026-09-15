@@ -67,7 +67,8 @@ local background publisher; closing its TUI does not stop sharing. A plugin
 startup hook restores sharing only when the saved global switch is enabled.
 The background publisher is not an OS login service and is not installed system-wide.
 
-Commands return JSON; errors have nonzero exit codes. An `enable` response with
+Commands return JSON, except `bee on`, which preserves native Herdr output and
+exit status; errors have nonzero exit codes. An `enable` response with
 `connected: true` and share IDs confirms registration. A failed initial connection
 is explicitly reported as pending with a nonzero exit code; the enabled publisher
 continues retrying. Use `status` to distinguish saved intent from live connectivity.
@@ -158,6 +159,75 @@ herdr plugin action invoke disable --plugin herdr.bee
 Herdr action invocation is asynchronous: its command log alone is not a publication
 receipt. Use the bundled `bee` CLI when an agent needs parameters and completion
 results. Consumer operations remain native Herdr commands.
+
+## Remote agent automation
+
+Every enrolled Bee can consume other devices' published sessions, including while
+its own sharing is off. Upgrade Hive and the publishing Bee to a version with API
+support, then use the existing identity and host trust; no host SSH login, new
+service, transport credential, or Herdr modification is required.
+
+1. Discover online targets:
+
+   ```sh
+   bee targets
+   ```
+
+   Each record includes `id`, `name`, `label` (Herdr session), `api`, and
+   `generation`. Select a stable share `id`, or the exact `name/label` pair.
+   Ambiguous names are rejected. Your own publications are excluded; use local
+   Herdr commands for those. A missing `api: true` or generation means that Hive
+   or the publishing Bee needs an upgrade.
+
+2. Run the native Herdr CLI in that target's context. These examples assume a
+   Bee named `B` sharing session `research`:
+
+   ```sh
+   bee on B/research -- herdr workspace list
+   bee on B/research -- herdr agent list
+   bee on B/research -- herdr agent prompt reviewer "Inspect the current changes" --wait --timeout 120000
+   bee on B/research -- herdr agent read reviewer --source recent-unwrapped --lines 120
+   ```
+
+3. To create an agent, first create its terminal and use the returned ID:
+
+   ```sh
+   created=$(bee on B/research -- herdr workspace create --cwd /srv/project --label review --no-focus)
+   pane=$(printf '%s\n' "$created" | jq -r '.result.root_pane.pane_id')
+   bee on B/research -- herdr agent start reviewer --kind codex --pane "$pane"
+   ```
+
+   `/srv/project` is a directory on B. The agent executable and its account must
+   already be configured on B. Startup success means native Herdr detected an
+   interactive agent. If startup blocks or fails, inspect the returned name/pane;
+   do not blindly repeat creation. A created pane is not automatically deleted.
+
+4. Use the same wrapper for native `pane`, `tab`, and `workspace` management.
+   Discover IDs from the target before operating; names and IDs are scoped to
+   that session. B and C may each have `reviewer` without conflict. Concurrent
+   `bee on` calls have independent sockets and cannot change each other's target.
+
+`bee on` executes the local Herdr CLI with an invocation-private API proxy socket.
+Hive routes each API connection to the same selected publication generation; the
+target Bee checks its bound session socket and the method allowlist. The native
+CLI keeps its protocol checks, startup polling, wait semantics, output formatting,
+stdin, stderr, and exit status. Text reads remain text, not Bee JSON envelopes.
+
+The wrapper clears inherited `HERDR_*` context and rejects session overrides,
+the `--current` option, and relative `--cwd` option values. Literal prompt or
+shell text is preserved. Use explicit target pane/workspace IDs.
+Interactive `agent attach`, binary terminal transport, local-file explanation,
+worktree commands, plugin administration, and server stop/update are outside this
+API route. Native UI sharing remains available for interactive viewing.
+
+Sharing still grants registered members full control of the selected session.
+Closing a remote pane affects the real process on its owner. Disabling sharing
+closes API connections while local agents keep running. Session replacement or
+publisher reconnection invalidates an invocation; discovery on the next command
+finds the fresh generation. An interrupted write can already have taken effect:
+Bee never replays it. Inspect state before retrying. Native waits observe agent
+states, not durable task IDs or guaranteed complete answer transcripts. Multiple
+callers retain Herdr's native concurrent input semantics.
 
 ## Update
 

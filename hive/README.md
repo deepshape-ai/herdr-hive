@@ -205,7 +205,10 @@ protocol. Omit `--remote-session` in both modes.
 Defaults: 64 simultaneous SSH transports, 16 application channels globally, at
 most 32 published sessions per device, and 1,024 persisted device names. Override
 only the first two with `--max-connections` and `--max-channels`. Bootstrap and
-terminal connections both consume the channel budget; rejection is explicit.
+terminal connections and remote API calls all consume the channel budget;
+rejection is explicit. Long-running `bee on` agent waits hold a slot until their
+timeout, completion or cancellation. Use finite wait timeouts and allow room
+for directory and control commands when sizing concurrent automation.
 
 The SSH library bounds channel windows to 2 MiB per direction. Two relay legs
 therefore contribute at most approximately 4 MiB of receive-window capacity per

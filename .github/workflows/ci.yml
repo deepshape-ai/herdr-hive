@@ -86,4 +86,5 @@ jobs:
           .local/venv/bin/pip install -r tests/integration/requirements.txt
       - run: make package VERSION=0.1.0-ci
       - run: .local/venv/bin/python tests/integration/native.py
+      - run: python3 -B tests/integration/remote_cli.py
       - run: python3 tests/integration/panel.py

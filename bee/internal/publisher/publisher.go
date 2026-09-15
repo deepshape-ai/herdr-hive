@@ -21,10 +21,12 @@ import (
 )
 
 type Share struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	ID    string `json:"id,omitempty"`
-	Name  string `json:"name,omitempty"`
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	API        bool   `json:"api,omitempty"`
+	Generation string `json:"generation,omitempty"`
 }
 type Status struct {
 	Version    string  `json:"version,omitempty"`
@@ -132,7 +134,7 @@ func connect(ctx context.Context, c config.Config, state *State) error {
 			return fmt.Errorf("session %q: %w", r.Session, e)
 		}
 		bound[r.Key] = b
-		shares = append(shares, Share{Key: r.Key, Label: r.Session})
+		shares = append(shares, Share{Key: r.Key, Label: r.Session, API: true})
 	}
 	client, cleanup, e := dial(ctx, c, "bee", "SSH-2.0-HerdrBee")
 	if e != nil {
@@ -215,6 +217,23 @@ func connect(ctx context.Context, c config.Config, state *State) error {
 	}
 }
 func handle(ctx context.Context, n ssh.NewChannel, b herdr.Bound, kind string) {
+	if kind == "api" {
+		if err := b.Check(); err != nil {
+			n.Reject(ssh.ConnectionFailed, "session offline or replaced")
+			return
+		}
+		ch, reqs, err := n.Accept()
+		if err != nil {
+			return
+		}
+		defer ch.Close()
+		child, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go func() { ssh.DiscardRequests(reqs); cancel() }()
+		// API failures are returned to the caller; never log prompt/output content.
+		_ = b.ServeAPI(child, ch)
+		return
+	}
 	if kind == "client" || kind == "check" {
 		local, e := b.Dial()
 		if e != nil {

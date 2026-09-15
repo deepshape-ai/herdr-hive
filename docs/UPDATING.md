@@ -47,7 +47,9 @@ not replayed. Herdr controls consumer reconnection behavior.
   process untouched. If installation succeeds but activation fails, the command
   reports an error containing the installed version. Repeating the update can
   retry activation; inspect the service rather than assuming a successful switch.
-- Config schema version 1 is unchanged. Protocol v1 is unchanged. Unknown future
+- Config schema version 1 is unchanged. Protocol v1 remains compatible; the
+  optional remote API channel requires Hive and both Bees at version 0.4.0 or
+  newer. Unknown future
   configuration versions remain rejected. Each future schema change must ship
   its forward migration and compatibility tests with that release.
 - No automatic update timer, persistent update cache, version history, rollback

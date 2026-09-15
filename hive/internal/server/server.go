@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,10 +28,12 @@ const maxControl = 64 << 10
 const streamChannel = "bee-stream-v1"
 
 type Share struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	ID    string `json:"id,omitempty"`
-	Name  string `json:"name,omitempty"`
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	API        bool   `json:"api,omitempty"`
+	Generation string `json:"generation,omitempty"`
 }
 type Publish struct {
 	Version int     `json:"version"`
@@ -160,7 +163,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener, signer ssh.Signer) e
 			defer func() { conn.Close(); <-requestsDone; s.unpublish(conn); handlers.Wait() }()
 			slots := s.channels
 			for ch := range chans {
-				if conn.User() == "enroll" || ch.ChannelType() != "session" {
+				if conn.User() == "enroll" || (ch.ChannelType() != "session" && ch.ChannelType() != apiChannel) {
 					ch.Reject(ssh.Prohibited, "only application sessions are supported")
 					continue
 				}
@@ -172,7 +175,15 @@ func (s *Server) Serve(ctx context.Context, l net.Listener, signer ssh.Signer) e
 					continue
 				}
 				handlers.Add(1)
-				go func(ch ssh.NewChannel) { defer handlers.Done(); defer func() { <-slots }(); s.session(conn, ch) }(ch)
+				go func(ch ssh.NewChannel) {
+					defer handlers.Done()
+					defer func() { <-slots }()
+					if ch.ChannelType() == apiChannel {
+						s.api(conn, ch)
+					} else {
+						s.session(conn, ch)
+					}
+				}(ch)
 			}
 		}()
 	}
@@ -239,10 +250,15 @@ func (s *Server) publish(c *ssh.ServerConn, p Publish) ([]Share, error) {
 		return nil, e
 	}
 	out := make([]Share, 0, len(p.Shares))
+	var nonce [16]byte
+	if _, e := rand.Read(nonce[:]); e != nil {
+		return nil, e
+	}
 	for _, v := range p.Shares {
 		h := sha256.Sum256([]byte(owner + "\x00" + v.Key))
 		v.ID = "s-" + hex.EncodeToString(h[:12])
 		v.Name = name
+		v.Generation = hex.EncodeToString(nonce[:])
 		s.shares[v.ID] = &binding{share: v, conn: c, active: map[ssh.Channel]bool{}}
 		out = append(out, v)
 	}

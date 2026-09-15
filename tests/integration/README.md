@@ -13,7 +13,20 @@ python3 -m venv .local/venv
 python3 tests/integration/panel.py
 ```
 
-Requires Herdr 0.9.0 and OpenSSH. The native test covers three local publishers,
+Native integration requires Herdr 0.9.0 and OpenSSH.
+
+`python3 -B tests/integration/remote_cli.py` independently verifies the CLI API
+route using three disposable Bees, real Hive/Herdr binaries and a deterministic
+foreground agent fixture. It covers A→B, B→C and C→A native agent creation,
+prompt/wait/read, same-name isolation, concurrent B/C calls, tab/pane management,
+native exit codes, private-target rejection and unsharing. The agent fixture
+uses real Herdr reporting/detection but makes no paid inference requests and
+needs no agent account. All sessions, keys, binaries and sockets live under a
+temporary directory and are removed. No user installation is changed.
+Set `BEE_NATIVE_TEST_BINARY` and `HIVE_NATIVE_TEST_BINARY` to absolute executable
+paths to run the same acceptance test against downloaded release binaries.
+
+The native UI test covers three local publishers,
 real native `machine add`, real terminal input/output, name collisions, shell and
 unshared-target rejection, and sharing shutdown without agent termination.
 The test also measures actual PTY sizes with a publisher-local shell and two

@@ -111,13 +111,31 @@ hive/README.md; unsupported aggregate operations remain available by direct shar
 | Close local machine profile | Native detach; does not stop owner's server |
 | Close/kill remote pane | Native remote operation, including destructive effects allowed by full control |
 | Restart/resume agent | Available native UI behavior; Hive does not launch or resume agents |
-| Remote CLI/API routing | Exactly the selected Herdr release's native support. v0.9.0 does not gain newer `--machine agent` commands through Bee |
+| Remote CLI/API routing | `bee on B/session -- herdr …` supplies a private API proxy socket to the unchanged native CLI; each invocation pins one publication generation |
 | Remote Herdr install/upgrade, session override | Rejected by the bootstrap allowlist; upgrade explicitly on the owner host |
 
 The main maintenance risk is the native bootstrap contract, which Herdr does not
 expose as a stable plugin transport API. Changes are isolated in
 `hive/internal/herdr` and verified using native integration tests. Compatible native
 payload changes need no relay rewrite; arbitrary future versions are not promised.
+
+## Agent-to-agent automation
+
+Every Bee can both publish and consume. `bee targets` exposes the existing Hive
+directory with API capability and publication generation. `bee on` resolves one
+share, creates a private local proxy socket and runs the native Herdr CLI with
+clean caller context. The local CLI's API requests travel over SSH to Hive, then
+over the target's reverse connection into its bound Herdr API socket. There is no
+global selected remote and no merged agent-name namespace. Native multi-request
+startup polling stays in one session, even when other calls target another Bee.
+
+The target Bee enforces a method allowlist. Hive pins the publication generation,
+excludes self-routing, and tears down API channels on unpublication. Bee also
+checks the local socket identity during long waits. Reconnect never replays a
+request. Native response JSON and exit codes remain authoritative; this adds no
+task scheduler, inference service, transcript store, or exactly-once task promise.
+See [the wire contract](../protocol/v1.md#session-scoped-cli-api-extension) and
+[agent usage](../bee/README.md#remote-agent-automation).
 
 ## Resource control and observability
 
