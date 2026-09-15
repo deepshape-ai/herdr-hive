@@ -42,19 +42,34 @@ func TestAPIRejectsUnsupportedMethodsAndReplacedSocket(t *testing.T) {
 	for _, method := range []string{"server.stop", "plugin.action.invoke", "integration.install", "unknown", "agent.get"} {
 		t.Run(method, func(t *testing.T) {
 			b, l := apiFixture(t)
+			wantCode := "bee_operation_unsupported"
 			if method == "agent.get" {
+				wantCode = "bee_session_changed"
 				l.Close()
 				other, err := net.Listen("unix", b.Socket)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer other.Close()
+				now, err := os.Stat(b.Socket)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("replacement socket: SameFile=%t; oldModTime=%s; newModTime=%s; old=%+v; new=%+v", os.SameFile(b.apiInfo, now), b.apiInfo.ModTime().Format(time.RFC3339Nano), now.ModTime().Format(time.RFC3339Nano), b.apiInfo.Sys(), now.Sys())
 			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			a, caller := net.Pipe()
 			defer caller.Close()
+			deadline, _ := ctx.Deadline()
+			if err := caller.SetDeadline(deadline); err != nil {
+				t.Fatal(err)
+			}
 			done := make(chan error, 1)
-			go func() { defer a.Close(); done <- b.ServeAPI(context.Background(), a) }()
-			json.NewEncoder(caller).Encode(map[string]any{"id": "request", "method": method, "params": map[string]any{}})
+			go func() { defer a.Close(); done <- b.ServeAPI(ctx, a) }()
+			if err := json.NewEncoder(caller).Encode(map[string]any{"id": "request", "method": method, "params": map[string]any{}}); err != nil {
+				t.Fatalf("send %s request: %v", method, err)
+			}
 			var reply struct {
 				ID    string `json:"id"`
 				Error struct {
@@ -62,13 +77,18 @@ func TestAPIRejectsUnsupportedMethodsAndReplacedSocket(t *testing.T) {
 				} `json:"error"`
 			}
 			if err := json.NewDecoder(caller).Decode(&reply); err != nil {
-				t.Fatal(err)
+				t.Fatalf("expected %s for %s; read failed: %v; bound check: %v", wantCode, method, err, b.Check())
 			}
-			if reply.ID != "request" || reply.Error.Code == "" {
-				t.Fatal(reply)
+			if reply.ID != "request" || reply.Error.Code != wantCode {
+				t.Fatalf("expected request ID and %s; got %+v", wantCode, reply)
 			}
-			if err := <-done; err != nil {
-				t.Fatal(err)
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatalf("ServeAPI did not finish after returning %s: %v", wantCode, ctx.Err())
 			}
 		})
 	}
