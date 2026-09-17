@@ -89,8 +89,16 @@ emit() {
 if [ -n "$home" ]; then
     emit "$home/.local/bin/herdr"
 fi
+emit "/home/linuxbrew/.linuxbrew/bin/herdr"
+if [ -n "$home" ]; then
+    emit "$home/.local/share/mise/installs/herdr/$version/bin/herdr"
+    emit "$home/.local/share/mise/installs/herdr/$version/herdr"
+    emit "$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr"
+    emit "$home/.nix-profile/bin/herdr"
+fi
 if [ -n "$user" ]; then
     emit "/etc/profiles/per-user/$user/bin/herdr"
 fi
+emit "/nix/var/nix/profiles/default/bin/herdr"
 emit "/run/current-system/sw/bin/herdr"`
 }

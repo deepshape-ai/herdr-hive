@@ -30,7 +30,6 @@ func supportedDiscoveryScript(command string) bool {
 
 	seenCandidate, blockHasCandidate := false, false
 	block := ""
-	seenBlocks := map[string]bool{}
 	for _, rawLine := range lines[3+len(discoveryFunction):] {
 		line := strings.TrimSpace(rawLine)
 		switch line {
@@ -39,11 +38,10 @@ func supportedDiscoveryScript(command string) bool {
 			if line == `if [ -n "$user" ]; then` {
 				variable = "$user"
 			}
-			if block != "" || seenBlocks[variable] {
+			if block != "" {
 				return false
 			}
 			block, blockHasCandidate = variable, false
-			seenBlocks[variable] = true
 		case "fi":
 			if block == "" || !blockHasCandidate {
 				return false
@@ -76,7 +74,9 @@ func safeEmitLine(line, block string) bool {
 	if block == "" {
 		return !strings.Contains(path, "$")
 	}
-	return strings.Contains(path, block) && !strings.Contains(strings.ReplaceAll(path, block, ""), "$")
+	expanded := strings.ReplaceAll(path, block, "")
+	expanded = strings.ReplaceAll(expanded, "$version", "")
+	return strings.Contains(path, block) && !strings.Contains(expanded, "$")
 }
 
 func supportedVersion(version string) bool {
