@@ -163,6 +163,69 @@ func responseFrame(boot, id string) []byte {
 	b = append(b, 1)
 	return append(b, str(`{"id":"r","result":{"type":"ok"}}`)...)
 }
+func notifyFrame(kind uint64) []byte {
+	b := append([]byte{4}, number(kind)...)
+	b = append(b, str("agent done")...)
+	return append(b, 0)
+}
+func semanticNotificationFrame(kind uint64) []byte {
+	b := append([]byte{14}, number(kind)...)
+	b = append(b, str("agent needs attention")...)
+	b = append(b, 1)
+	b = append(b, str("repo · 1")...)
+	b = append(b, 1, 1) // Some(Request).
+	for _, value := range []string{"codex", "w1", "w1:t1", "w1:p1"} {
+		b = append(b, 1)
+		b = append(b, str(value)...)
+	}
+	return append(b, 1, 1) // Some(TopRight).
+}
+func TestAggregateSuppressesRemoteNotifications(t *testing.T) {
+	g := testSession()
+	b := &backend{}
+	g.active = b
+	g.surfaceActive = true
+
+	for _, frame := range [][]byte{
+		notifyFrame(0),
+		notifyFrame(1),
+		notifyFrame(2),
+		semanticNotificationFrame(0),
+		semanticNotificationFrame(1),
+		semanticNotificationFrame(2),
+		semanticNotificationFrame(3),
+	} {
+		if e := g.server(b, frame); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if g.out.(*memoryStream).Len() != 0 {
+		t.Fatal("remote notification reached aggregate viewer")
+	}
+
+	clipboard := append([]byte{5}, str("dGVzdA==")...)
+	if e := g.server(b, clipboard); e != nil {
+		t.Fatal(e)
+	}
+	forwarded, e := Read(g.out)
+	if e != nil || !bytes.Equal(forwarded, clipboard) {
+		t.Fatal("neighboring server message was not forwarded", e)
+	}
+}
+func TestAggregateRejectsMalformedRemoteNotifications(t *testing.T) {
+	g := testSession()
+	b := &backend{}
+	for _, frame := range [][]byte{
+		notifyFrame(3),
+		notifyFrame(0)[:2],
+		semanticNotificationFrame(4),
+		semanticNotificationFrame(0)[:3],
+	} {
+		if e := g.server(b, frame); e == nil {
+			t.Fatal("malformed notification accepted", frame)
+		}
+	}
+}
 func TestResponsesAreBoundToTheirSource(t *testing.T) {
 	g := testSession()
 	a := &backend{boot: "a", chunks: map[string][]byte{}}

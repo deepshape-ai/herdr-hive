@@ -152,6 +152,30 @@ func (d *decoder) option(fn func()) {
 		d.err = errWire
 	}
 }
+func (d *decoder) enum(max uint64) {
+	if d.num() > max {
+		d.err = errWire
+	}
+}
+func (d *decoder) notification(tag uint64) {
+	switch tag {
+	case 4:
+		d.enum(2) // NotifyKind: sound, toast, system toast.
+		d.text()
+		d.option(func() { d.text() })
+	case 14:
+		d.enum(3) // SemanticNotificationKind.
+		d.text()
+		d.option(func() { d.text() })
+		d.option(func() { d.enum(1) }) // SemanticNotificationSound.
+		for range 4 {                  // Agent, workspace, tab and pane identifiers.
+			d.option(func() { d.text() })
+		}
+		d.option(func() { d.enum(3) }) // ToastHerdrPosition.
+	default:
+		d.err = errWire
+	}
+}
 func (d *decoder) nums(n int) {
 	for i := 0; i < n; i++ {
 		d.num()

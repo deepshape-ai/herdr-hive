@@ -195,6 +195,11 @@ are not offered by the aggregate endpoint. Operations involving IDs from multipl
 sessions are rejected. Shared sessions retain native Herdr input semantics;
 [updated Bee publishers](../bee/README.md#shared-terminal-sizing) pin PTY dimensions while viewed.
 
+The aggregate connection always suppresses remote completion and attention
+notifications, including their sounds and toasts. Remote agent state still appears
+in the normal Hive workspace UI. The direct `User s-…` path below remains
+transparent and keeps the source session's notification behavior.
+
 For a connection to one session, `ssh hive 'list --json'` still returns
 the directory. Create another alias with `User s-…` from that response and run
 `herdr machine add <alias>`. This direct path preserves the full upstream native

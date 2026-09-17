@@ -110,7 +110,7 @@ hive/README.md; unsupported aggregate operations remain available by direct shar
 | Workspace/tab/pane management | Native server semantics; all objects inside selected session are accessible |
 | Resize, scrollback and copy | Bee pins viewed PTY sizes; scroll/copy stay native, aggregate IDs and surfaces are translated |
 | Concurrent consumers / local owner input | Native Herdr concurrency semantics; no additional single-writer lease |
-| Agent state | Native Herdr events and detection; no proxy-pane metadata impersonation |
+| Agent state | Native Herdr snapshot state is preserved; the aggregate endpoint suppresses remote completion/attention sounds and toasts |
 | Images, terminal extensions, files | Whatever the supported Herdr native transport implements; not independently certified here. Hive does not add SFTP/SCP |
 | Close local machine profile | Native detach; does not stop owner's server |
 | Close/kill remote pane | Native remote operation, including destructive effects allowed by full control |

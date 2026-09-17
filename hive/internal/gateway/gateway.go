@@ -587,7 +587,16 @@ func (g *session) server(b *backend, p []byte) error {
 		return g.response(id, v)
 	case 3:
 		return io.EOF
-	case 4, 5, 6, 8, 9, 15, 17:
+	case 4, 14:
+		// Aggregate viewers observe remote agent state through snapshots. Do not
+		// mix remote completion/attention sounds and toasts into the viewer's
+		// local notifications. Validate the frozen codec before discarding it.
+		d.notification(tag)
+		if d.err != nil || d.p != len(p) {
+			return errWire
+		}
+		return nil
+	case 5, 6, 8, 9, 15, 17:
 		if tag == 6 || tag == 8 || tag == 17 {
 			b.effects[tag] = append([]byte(nil), p...)
 		}
