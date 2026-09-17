@@ -13,7 +13,7 @@ python3 -m venv .local/venv
 python3 tests/integration/panel.py
 ```
 
-Native integration requires Herdr 0.9.0 and OpenSSH.
+Native integration requires compatible Herdr 0.9.0 or newer and OpenSSH.
 
 `python3 -B tests/integration/remote_cli.py` independently verifies the CLI API
 route using three disposable Bees, real Hive/Herdr binaries and a deterministic

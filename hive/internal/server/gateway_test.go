@@ -55,6 +55,16 @@ func TestAggregateViewerAdmissionAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	probe, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.Stdin = strings.NewReader("printf '\n%s\n' 'herdr-remote-output-ready:1'\nuname -s\nuname -m\n")
+	output, err := probe.Output("/bin/sh -s")
+	probe.Close()
+	if err != nil || string(output) != "\nherdr-remote-output-ready:1\nLinux\nx86_64\n" {
+		t.Fatalf("framed platform probe = %q, %v", output, err)
+	}
 	open := func() (*ssh.Session, io.WriteCloser) {
 		t.Helper()
 		v, err := c.NewSession()

@@ -93,9 +93,11 @@ reconnect the entire Bee publication, favoring simple ownership over partial upd
 
 ## Native compatibility
 
-The integration target verified in this implementation is Herdr 0.9.0. Native
-bootstrap scripts are identified by exact requests or known discovery hashes.
-Unknown scripts are rejected, never executed. Bee stages shell activation and
+The native bootstrap adapter accepts compatible Herdr 0.9.0 and newer. It
+recognizes exact operational requests, preserves the framed output protocol used
+since 0.9.1, and validates discovery scripts by constrained grammar and semantic
+version instead of whole-script hashes. Unknown scripts are rejected; accepted
+scripts are inspected as data and never executed. Bee stages shell activation and
 uses private surface barriers while forwarding native terminal input and output.
 The aggregate codec and limits are specified in protocol/v1.md and
 hive/README.md; unsupported aggregate operations remain available by direct sharing ID.

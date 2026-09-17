@@ -226,9 +226,11 @@ func (s *Server) requests(c *ssh.ServerConn, reqs <-chan *ssh.Request) {
 		}
 	}
 }
+
 func validLabel(v string) bool {
 	return len(v) > 0 && len(v) <= 128 && !strings.ContainsFunc(v, unicode.IsControl)
 }
+
 func (s *Server) publish(c *ssh.ServerConn, p Publish) ([]Share, error) {
 	if p.Version != 1 || !validLabel(p.Name) || len(p.Shares) == 0 || len(p.Shares) > 32 {
 		return nil, errors.New("invalid publication")
@@ -383,7 +385,7 @@ func (s *Server) execute(c *ssh.ServerConn, ch ssh.Channel, command string, clie
 		timer.Stop()
 		script = string(data)
 	}
-	a, e := herdr.Resolve(command, script)
+	a, e := beginHerdrRequest(ch, command, script)
 	if e != nil {
 		return e
 	}
@@ -412,6 +414,18 @@ func (s *Server) execute(c *ssh.ServerConn, ch ssh.Channel, command string, clie
 	_, e = io.Copy(ch, io.LimitReader(remote, maxControl))
 	return e
 }
+
+func beginHerdrRequest(ch ssh.Channel, command, script string) (herdr.Action, error) {
+	action, err := herdr.Resolve(command, script)
+	if err != nil {
+		return herdr.Action{}, err
+	}
+	if err = action.BeginResponse(ch); err != nil {
+		return herdr.Action{}, err
+	}
+	return action, nil
+}
+
 func splice(a, b ssh.Channel, up, down *atomic.Uint64, clientDone, publisherDone <-chan struct{}, closeConsumer, closePublisher func()) error {
 	done := make(chan error, 2)
 	go func() { _, e := io.Copy(countWriter{b, up}, a); done <- e }()

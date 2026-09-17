@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/deepshape-ai/herdr-hive/hive/internal/gateway"
-	"github.com/deepshape-ai/herdr-hive/hive/internal/herdr"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,7 +24,7 @@ func (s *Server) aggregate(c *ssh.ServerConn, ch ssh.Channel, command string, cl
 		}
 		script = string(data)
 	}
-	a, e := herdr.Resolve(command, script)
+	a, e := beginHerdrRequest(ch, command, script)
 	if e != nil {
 		return e
 	}

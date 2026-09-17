@@ -62,8 +62,10 @@ limits bound overload risk separately from these light-load observations.
 No physical 64-host test, long-duration soak, image/file-transfer certification,
 agent-specific approval/resume test, or complete native UI feature audit has been
 performed. Native transport reuse does not constitute evidence that every future
-Herdr version or terminal extension is compatible. The current bootstrap adapter
-is verified against Herdr 0.9.0. Unknown bootstrap requests fail closed.
+Herdr version or terminal extension is compatible. The bootstrap adapter has
+unit coverage for the unframed 0.9.0 protocol and the framed 0.9.1 protocol;
+compatible discovery scripts advertising version 0.9.0 or newer are accepted by
+grammar rather than exact hash. Unknown bootstrap requests fail closed.
 
 See [integration instructions](../tests/integration/README.md) and the checked-in
 tests for reproducible setup. CI defines independent macOS/Linux Go checks; a local

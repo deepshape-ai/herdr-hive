@@ -10,8 +10,9 @@ other members access shared workspaces through one native Herdr machine.
 - **Hive** runs on a shared server and connects registered devices.
 - **Bee** is a Herdr plugin for joining Hive and choosing sessions to share.
 
-No Herdr source changes or SSH login to members' hosts are needed. Tested with
-Herdr **0.9.0**. This is an independent community project.
+No Herdr source changes or SSH login to members' hosts are needed. The native
+bootstrap adapter accepts compatible Herdr versions **0.9.0 and newer**. This is
+an independent community project.
 
 **Sharing gives registered Hive members full control of the selected session,
 including all its workspaces, panes and agents.** See [security boundaries](SECURITY.md).

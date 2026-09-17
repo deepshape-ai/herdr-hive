@@ -102,20 +102,24 @@ func TestGatewayDuplexLimitsBackpressureAndDisconnect(t *testing.T) {
 	json.Unmarshal(data, &shares)
 	consumer := dial(shares[0].ID)
 	defer consumer.Close()
-	start := func() ssh.Channel {
+	start := func(command string) ssh.Channel {
 		t.Helper()
 		ch, requests, e := consumer.OpenChannel("session", nil)
 		if e != nil {
 			t.Fatal(e)
 		}
 		go ssh.DiscardRequests(requests)
-		ok, e := ch.SendRequest("exec", true, ssh.Marshal(struct{ Command string }{"exec /herdr remote-client-bridge"}))
+		ok, e := ch.SendRequest("exec", true, ssh.Marshal(struct{ Command string }{command}))
 		if e != nil || !ok {
 			t.Fatal(e)
 		}
 		return ch
 	}
-	ch := start()
+	ch := start("printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec /herdr remote-client-bridge")
+	prelude := make([]byte, len("\nherdr-remote-output-ready:1\n"))
+	if _, e = io.ReadFull(ch, prelude); e != nil || string(prelude) != "\nherdr-remote-output-ready:1\n" {
+		t.Fatalf("framed prelude %q %v", prelude, e)
+	}
 	n := <-incoming
 	remote, reqs, e := n.Accept()
 	if e != nil {
@@ -142,7 +146,7 @@ func TestGatewayDuplexLimitsBackpressureAndDisconnect(t *testing.T) {
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	slow := start()
+	slow := start("exec /herdr remote-client-bridge")
 	n = <-incoming
 	producer, reqs, e := n.Accept()
 	if e != nil {
@@ -179,7 +183,7 @@ func TestGatewayDuplexLimitsBackpressureAndDisconnect(t *testing.T) {
 	}
 	producer.Close()
 	consumer = dial(shares[0].ID)
-	stalled := start()
+	stalled := start("exec /herdr remote-client-bridge")
 	n = <-incoming
 	noReader, reqs, e := n.Accept()
 	if e != nil {
