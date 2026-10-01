@@ -73,6 +73,12 @@ exit status; errors have nonzero exit codes. An `enable` response with
 is explicitly reported as pending with a nonzero exit code; the enabled publisher
 continues retrying. Use `status` to distinguish saved intent from live connectivity.
 
+Bee checks the published session sockets every second. If a Herdr update or
+restart replaces or removes either endpoint, Bee withdraws the old publication
+and retries with fresh session bindings. Sharing resumes once Herdr is ready;
+no manual sharing toggle is needed. Existing remote connections close and are
+not replayed.
+
 `status` includes the name resolved by Hive. Display names can change without
 changing share IDs. One device identity should belong to one Bee instance; a
 second concurrent publisher using that identity is rejected.

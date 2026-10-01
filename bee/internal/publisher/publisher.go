@@ -187,10 +187,20 @@ func connect(ctx context.Context, c config.Config, state *State) error {
 	defer cancelStreams()
 	// Close the SSH connection before waiting for handlers so every stream is interrupted.
 	defer client.Close()
+	// Herdr updates and restarts replace session sockets while Hive stays
+	// connected. Withdraw the stale publication so Run can bind fresh endpoints.
+	bindingTick := time.NewTicker(time.Second)
+	defer bindingTick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-bindingTick.C:
+			for _, target := range bound {
+				if err := target.Check(); err != nil {
+					return fmt.Errorf("session %q: %w", target.Name, err)
+				}
+			}
 		case n, ok := <-incoming:
 			if !ok {
 				return errors.New("Hive connection closed")

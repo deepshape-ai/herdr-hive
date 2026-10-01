@@ -25,6 +25,9 @@ needs no agent account. All sessions, keys, binaries and sockets live under a
 temporary directory and are removed. No user installation is changed.
 Set `BEE_NATIVE_TEST_BINARY` and `HIVE_NATIVE_TEST_BINARY` to absolute executable
 paths to run the same acceptance test against downloaded release binaries.
+It also stops and restarts a publishing Herdr server twice, verifying stale
+publication withdrawal, automatic rebinding, stable share IDs, new generations
+and native CLI access without toggling Bee sharing.
 
 The native UI test covers three local publishers,
 real native `machine add`, real terminal input/output, name collisions, shell and

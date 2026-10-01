@@ -144,6 +144,36 @@ for line in sys.stdin:
                 assert shares[who]['id'] not in [s['id'] for s in listing]
             result['directory_capabilities_and_self_hiding'] = True
 
+            # Herdr updates/restarts replace endpoints without disconnecting
+            # Bee from Hive. No enable/reload call may be needed to recover.
+            sock = root / 'b/herdr/herdr.sock'
+            rebind_seconds = []
+            for restart in range(2):
+                previous = shares['b']
+                api(sock, 'server.stop')
+                wait(lambda: not sock.exists())
+                def withdrawn():
+                    status = json.loads(run([bindir / 'bee', 'status'], envs['b']).stdout)
+                    listing = json.loads(run([bindir / 'bee', 'targets'], envs['a']).stdout)
+                    return not status.get('connected') and previous['id'] not in [s['id'] for s in listing]
+                wait(withdrawn)
+                started = time.monotonic()
+                spawn([HERDR, 'server'], f'b-restarted-{restart}-herdr', envs['b'])
+                wait(sock.exists)
+                label = f'REBOUND_{restart}'
+                api(sock, 'workspace.create', {'cwd': str(root / 'b'), 'label': label})
+                def rebound():
+                    status = json.loads(run([bindir / 'bee', 'status'], envs['b']).stdout)
+                    if status.get('connected') and status['shares'][0]['generation'] != previous['generation']:
+                        shares['b'] = status['shares'][0]
+                        return True
+                wait(rebound)
+                assert shares['b']['id'] == previous['id'], 'restart changed the stable share ID'
+                workspaces = json.loads(remote('a', 'B/default', 'workspace', 'list').stdout)['result']['workspaces']
+                assert any(w['label'] == label for w in workspaces), workspaces
+                rebind_seconds.append(round(time.monotonic() - started, 3))
+            result['automatic_rebind_after_herdr_restarts'] = rebind_seconds
+
             panes, workspaces = {}, {}
             for caller, target in [('a', 'b'), ('b', 'c'), ('c', 'a')]:
                 selected = target.upper() + '/default'
