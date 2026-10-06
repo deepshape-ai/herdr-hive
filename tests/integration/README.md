@@ -53,6 +53,18 @@ optional hello flags, continuous source visibility, complete source-switch repla
 and upstream stream accounting/release. Hive deliberately negotiates only its
 implemented frozen codec, even when a viewer offers newer optional encodings.
 
+`python3 -B tests/integration/attachments.py` covers issue #1 with eight real
+publisher PTYs and 100 rapid last-viewer reconnects. Each connection must render
+publisher-produced output; the test checks exact controller-process reuse and
+the complete PTY geometry (rows, columns and pixel dimensions), then bounded local
+size restoration after final departure. A deliberately conflicting direct native
+controller must retain ownership while Hive stops reopening the failed publication
+for that viewer. SSH traffic counters verify quarantine rather than native log
+wording. Like the other native scripts, it uses disposable sessions and keys and
+accepts `BEE_NATIVE_TEST_BINARY` / `HIVE_NATIVE_TEST_BINARY` for baseline comparisons.
+Shared-sizing checks wait for bounded idle retirement before measuring unpinned
+local geometry; release is not required to be instantaneous.
+
 An isolated OpenSSH config wrapper only redirects config lookup; it does not
 replace Herdr, its protocol, or the SSH executable.
 

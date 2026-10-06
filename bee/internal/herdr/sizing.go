@@ -21,18 +21,63 @@ import (
 
 var sizeSlots = make(chan struct{}, 32) // Process-wide helper budget, across all shared sessions.
 
+const sizingIdleGrace = 2 * time.Second
+
+// Idle controllers can be reclaimed for another publication's live panes.
+// This mutex never acquires a Sizing mutex or retains a Bound.
+var idleSizes = struct {
+	sync.Mutex
+	locks map[*sizeLock]bool
+}{locks: map[*sizeLock]bool{}}
+
+// StreamFailure classifies failures without putting native content or local
+// paths in the code sent to Hive. Transport and cancellation errors stay plain.
+type StreamFailure struct {
+	Code      string
+	Retryable bool
+	Err       error
+}
+
+func (e *StreamFailure) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return e.Code
+}
+
+func (e *StreamFailure) Unwrap() error { return e.Err }
+
+func sizingUnavailable(err error) error {
+	return &StreamFailure{Code: "sizing_unavailable", Err: err}
+}
+
+func nativeProtocol(err error) error {
+	return &StreamFailure{Code: "native_protocol", Err: err}
+}
+
 // Sizing is shared by all remote viewers of one published session. Native local
 // clients keep their input path; Herdr's direct attach lock owns only PTY sizing.
 // No controller uses --takeover, so an existing direct attach is never evicted.
 type Sizing struct {
-	mu    sync.Mutex
-	bound Bound
-	locks map[string]*sizeLock
+	mu     sync.Mutex
+	bound  Bound
+	ctx    context.Context
+	cancel context.CancelFunc
+	closed bool
+	locks  map[string]*sizeLock
+	panes  map[string]bool
 }
 type sizeLock struct {
-	refs   int
-	cancel context.CancelFunc
-	done   <-chan struct{}
+	refs    int
+	cancel  context.CancelFunc
+	done    <-chan struct{}
+	retire  *time.Timer
+	epoch   uint64
+	retired bool // Protected by idleSizes, including live-capacity eviction.
+}
+type paneGeometry struct {
+	terminal string
+	size     *unix.Winsize
 }
 type shellSnapshot struct {
 	Revision   uint64 `json:"revision"`
@@ -61,7 +106,9 @@ type sizeView struct {
 	ctx             context.Context
 	active          bool
 	snapshot        shellSnapshot
+	catalogSeen     bool
 	held            map[string]bool
+	heldLocks       map[string]*sizeLock
 	pending         map[string]*navigation
 	sequence        uint64
 	initial         bool
@@ -93,12 +140,19 @@ func (b Bound) api(ctx context.Context, method string, params any, result any) e
 		Error  json.RawMessage `json:"error"`
 	}
 	if err = json.NewDecoder(io.LimitReader(c, 2<<20)).Decode(&response); err != nil {
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) {
+			return nativeProtocol(err)
+		}
 		return err
 	}
 	if len(response.Error) > 0 {
-		return fmt.Errorf("Herdr %s rejected sizing query", method)
+		return sizingUnavailable(fmt.Errorf("Herdr %s rejected sizing query", method))
 	}
-	return json.Unmarshal(response.Result, result)
+	if err := json.Unmarshal(response.Result, result); err != nil {
+		return nativeProtocol(err)
+	}
+	return nil
 }
 
 // Read the actual PTY dimensions, not pane.layout's outer rect (which includes
@@ -121,7 +175,7 @@ func (b Bound) terminalGeometry(ctx context.Context, pane string) (string, *unix
 		return "", nil, err
 	}
 	if info.Process.PID <= 0 || p.Pane.Terminal == "" {
-		return "", nil, errors.New("pane has no live PTY")
+		return "", nil, sizingUnavailable(errors.New("pane has no live PTY"))
 	}
 	cmd := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(info.Process.PID), "-o", "tty=")
 	out, err := cmd.Output()
@@ -130,7 +184,7 @@ func (b Bound) terminalGeometry(ctx context.Context, pane string) (string, *unix
 	}
 	tty := strings.TrimSpace(string(out))
 	if tty == "" || tty == "?" || tty == "??" || filepath.IsAbs(tty) || strings.Contains(tty, "..") {
-		return "", nil, errors.New("pane PTY unavailable")
+		return "", nil, sizingUnavailable(errors.New("pane PTY unavailable"))
 	}
 	f, err := os.OpenFile("/dev/"+tty, os.O_RDONLY|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
@@ -142,16 +196,43 @@ func (b Bound) terminalGeometry(ctx context.Context, pane string) (string, *unix
 		return "", nil, err
 	}
 	if size.Col == 0 || size.Row == 0 || uint64(size.Col)*uint64(size.Row) > 65536 {
-		return "", nil, errors.New("pane PTY dimensions exceed sizing budget")
+		return "", nil, sizingUnavailable(errors.New("pane PTY dimensions exceed sizing budget"))
 	}
 	return p.Pane.Terminal, size, nil
 }
 
-func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
-	select {
-	case sizeSlots <- struct{}{}:
-	default:
-		return nil, errors.New("publisher sizing limit reached (32 panes)")
+func reserveSizeSlot() error {
+	idleSizes.Lock()
+	defer idleSizes.Unlock()
+	for {
+		select {
+		case sizeSlots <- struct{}{}:
+			return nil
+		default:
+		}
+		var idle *sizeLock
+		for l := range idleSizes.locks {
+			idle = l
+			break
+		}
+		if idle == nil {
+			return &StreamFailure{Code: "sizing_limit", Retryable: true, Err: errors.New("publisher sizing limit reached (32 panes)")}
+		}
+		delete(idleSizes.locks, idle)
+		idle.retired = true
+		idle.cancel()
+		// Helper completion does not acquire either registry mutex. The slot is
+		// returned before done closes, so reclamation cannot reject live capacity.
+		<-idle.done
+	}
+}
+
+func (b Bound) holdSize(ctx, lifetime context.Context, geometry paneGeometry) (*sizeLock, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := reserveSizeSlot(); err != nil {
+		return nil, err
 	}
 	started := false
 	defer func() {
@@ -161,15 +242,12 @@ func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
 	}()
 	setup, cancelSetup := context.WithTimeout(ctx, 3*time.Second)
 	defer cancelSetup()
-	terminal, size, err := b.terminalGeometry(setup, pane)
-	if err != nil {
-		return nil, err
-	}
 	if err := b.Check(); err != nil {
 		return nil, err
 	}
-	child, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(child, binary(), "terminal", "session", "control", terminal, "--cols", strconv.Itoa(int(size.Col)), "--rows", strconv.Itoa(int(size.Row)))
+	child, cancel := context.WithCancel(lifetime)
+	size := geometry.size
+	cmd := exec.CommandContext(child, binary(), "terminal", "session", "control", geometry.terminal, "--cols", strconv.Itoa(int(size.Col)), "--rows", strconv.Itoa(int(size.Row)))
 	cmd.Env = append(cleanEnv(), "HERDR_SOCKET_PATH="+b.Socket)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -185,23 +263,28 @@ func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
 	if err = cmd.Start(); err != nil {
 		stdin.Close()
 		cancel()
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+			return nil, sizingUnavailable(err)
+		}
 		return nil, err
 	}
 	ready := make(chan error, 1)
 	done := make(chan struct{})
 	started = true
 	go func() {
-		defer func() { <-sizeSlots }()
 		defer close(done)
+		defer func() { <-sizeSlots }()
 		defer stdin.Close()
 		scan := bufio.NewScanner(stdout)
 		scan.Buffer(make([]byte, 4096), 8<<20)
 		notified := false
+		var setupErr error
 		for scan.Scan() {
 			var frame struct {
 				Type string `json:"type"`
 			}
-			if json.Unmarshal(scan.Bytes(), &frame) != nil {
+			if err := json.Unmarshal(scan.Bytes(), &frame); err != nil {
+				setupErr = nativeProtocol(err)
 				break
 			}
 			if frame.Type == "terminal.closed" {
@@ -211,8 +294,8 @@ func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
 				// Restore coherent cell pixels as well as rows/columns. CLI's initial
 				// control handshake uses zero cell pixels; dimensions remain unchanged.
 				if size.Xpixel > 0 && size.Ypixel > 0 {
-					err := json.NewEncoder(stdin).Encode(map[string]any{"type": "terminal.resize", "cols": size.Col, "rows": size.Row, "cell_width_px": size.Xpixel / size.Col, "cell_height_px": size.Ypixel / size.Row})
-					if err != nil {
+					setupErr = json.NewEncoder(stdin).Encode(map[string]any{"type": "terminal.resize", "cols": size.Col, "rows": size.Row, "cell_width_px": size.Xpixel / size.Col, "cell_height_px": size.Ypixel / size.Row})
+					if setupErr != nil {
 						break
 					}
 				}
@@ -221,7 +304,13 @@ func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
 			}
 		}
 		if !notified {
-			ready <- errors.New("terminal size controller unavailable (possibly already attached)")
+			if setupErr == nil {
+				setupErr = scan.Err()
+			}
+			if setupErr == nil {
+				setupErr = sizingUnavailable(errors.New("terminal size controller unavailable (possibly already attached)"))
+			}
+			ready <- setupErr
 		}
 		cancel()
 		cmd.Wait()
@@ -230,10 +319,16 @@ func (b Bound) holdSize(ctx context.Context, pane string) (*sizeLock, error) {
 	case err = <-ready:
 	case <-setup.Done():
 		err = setup.Err()
+		if ctx.Err() == nil {
+			err = sizingUnavailable(err)
+		}
 	}
 	if err != nil {
 		cancel()
 		<-done
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 	return &sizeLock{cancel: cancel, done: done}, nil
@@ -256,82 +351,359 @@ func (s *Sizing) paneExists(ctx context.Context, pane string) (bool, error) {
 	return false, nil
 }
 
+// Caller owns s.mu. The global idle mutex is always below this mutex; capacity
+// reclamation cancels helpers without acquiring any publication mutex.
+func (s *Sizing) stopLocked(pane string, l *sizeLock) {
+	l.epoch++
+	if l.retire != nil {
+		l.retire.Stop()
+		l.retire = nil
+	}
+	idleSizes.Lock()
+	delete(idleSizes.locks, l)
+	l.retired = true
+	l.cancel()
+	idleSizes.Unlock()
+	<-l.done
+	if s.locks[pane] == l {
+		delete(s.locks, pane)
+	}
+}
+
+func (s *Sizing) releaseLocked(pane string, held *sizeLock) {
+	l := s.locks[pane]
+	if l == nil || (held != nil && held != l) {
+		return // Publication close or a newer snapshot already removed it.
+	}
+	l.refs--
+	if l.refs != 0 {
+		return
+	}
+	select {
+	case <-l.done:
+		s.stopLocked(pane, l)
+		return
+	default:
+	}
+	l.epoch++
+	epoch := l.epoch
+	idleSizes.Lock()
+	idleSizes.locks[l] = true
+	idleSizes.Unlock()
+	l.retire = time.AfterFunc(sizingIdleGrace, func() { s.expire(pane, l, epoch) })
+}
+
+func (s *Sizing) expire(pane string, l *sizeLock, epoch uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks[pane] == l && l.refs == 0 && l.epoch == epoch {
+		s.stopLocked(pane, l)
+	}
+}
+
+func (s *Sizing) reuseLocked(pane string, l *sizeLock) bool {
+	idleSizes.Lock()
+	retired := l.retired
+	delete(idleSizes.locks, l)
+	idleSizes.Unlock()
+	if retired {
+		s.stopLocked(pane, l)
+		return false
+	}
+	l.epoch++
+	if l.retire != nil {
+		l.retire.Stop()
+		l.retire = nil
+	}
+	return true
+}
+
+func (s *Sizing) watch(pane string, l *sizeLock) {
+	<-l.done
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks[pane] != l || l.refs != 0 {
+		return
+	}
+	s.stopLocked(pane, l)
+}
+
+func (s *Sizing) close() {
+	// Cancel setup and live helpers before waiting for an acquiring viewer's
+	// registry lock. No boundLifetime lock is held here.
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for pane, l := range s.locks {
+		s.stopLocked(pane, l)
+	}
+}
+
+func (s *Sizing) snapshotLocked(ctx context.Context, snapshot shellSnapshot) error {
+	if snapshot.Boot == "" {
+		return nil
+	}
+	// ClientShell projection revisions belong to each viewer, not the
+	// publication. Only membership can be compared across their snapshots.
+	same := s.panes != nil && len(s.panes) == len(snapshot.Panes)
+	if same {
+		for _, p := range snapshot.Panes {
+			if !s.panes[p.ID] {
+				same = false
+				break
+			}
+		}
+	}
+	if same {
+		return nil
+	}
+	if s.panes == nil {
+		initial := make(map[string]bool, len(snapshot.Panes))
+		for _, p := range snapshot.Panes {
+			initial[p.ID] = true
+		}
+		covered := true
+		for pane := range s.locks {
+			if !initial[pane] {
+				covered = false
+				break
+			}
+		}
+		if covered {
+			// The first snapshot can initialize non-destructively. Any later
+			// membership change must be verified before stopping a helper.
+			s.panes = initial
+			return nil
+		}
+	}
+	return s.refreshPanesLocked(ctx)
+}
+
+func (s *Sizing) refreshPanesLocked(ctx context.Context) error {
+	query, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if s.ctx != nil {
+		stop := context.AfterFunc(s.ctx, cancel)
+		defer stop()
+	}
+	var result struct {
+		Panes []struct {
+			ID string `json:"pane_id"`
+		} `json:"panes"`
+	}
+	if err := s.bound.api(query, "pane.list", map[string]any{}, &result); err != nil {
+		if query.Err() != nil {
+			return query.Err()
+		}
+		return err
+	}
+	// A stale or newly connected viewer cannot remove another viewer's live
+	// pane: deletion authority comes from the native API, never its projection.
+	s.panes = make(map[string]bool, len(result.Panes))
+	for _, p := range result.Panes {
+		s.panes[p.ID] = true
+	}
+	for pane, l := range s.locks {
+		if !s.panes[pane] {
+			s.stopLocked(pane, l)
+		}
+	}
+	return nil
+}
+
+func (s *Sizing) acquisitionErrorLocked(ctx context.Context, pane string, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	exists, queryErr := s.paneExists(ctx, pane)
+	if queryErr == nil && !exists {
+		return nil
+	}
+	return fmt.Errorf("hold shared pane size: %w", err)
+}
+
 // Caller owns v.mu. Acquisitions precede releases: a competing viewer never
 // sees a gap in ownership. The session mutex serializes first arrivals.
 func (v *sizeView) reconcile() error {
 	s := v.sizing
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session binding is closed")
+	}
+	ctx := v.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !v.catalogSeen {
+		if err := s.snapshotLocked(ctx, v.snapshot); err != nil {
+			return err
+		}
+		v.catalogSeen = true
+	}
 	wanted := map[string]bool{}
+	var order []string
 	if v.active {
 		tabs := map[string]bool{v.snapshot.Tab: true}
 		for _, n := range v.pending {
 			if time.Since(n.since) > 10*time.Second {
-				return errors.New("shared tab navigation timed out")
+				return &StreamFailure{Code: "navigation_timeout", Retryable: true, Err: errors.New("shared tab navigation timed out")}
 			}
 			tabs[n.tab] = true
 		}
 		for _, p := range v.snapshot.Panes {
-			if tabs[p.Tab] {
+			if tabs[p.Tab] && !wanted[p.ID] && (s.panes == nil || s.panes[p.ID]) {
 				wanted[p.ID] = true
+				order = append(order, p.ID)
 			}
 		}
 	}
-	for pane := range wanted {
-		if l := s.locks[pane]; l != nil {
+	if len(wanted) > cap(sizeSlots) {
+		return &StreamFailure{Code: "sizing_limit", Retryable: true, Err: errors.New("shared terminal sizing limit reached (32 panes)")}
+	}
+	setup := ctx
+	lifetime := s.ctx
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	var cancel context.CancelFunc
+	var stopPublication func() bool
+	defer func() {
+		if cancel != nil {
+			cancel()
+		}
+		if stopPublication != nil {
+			stopPublication()
+		}
+	}()
+	prepareSetup := func() {
+		if cancel == nil {
+			setup, cancel = context.WithCancel(ctx)
+			if s.ctx != nil {
+				stopPublication = context.AfterFunc(lifetime, cancel)
+			}
+		}
+	}
+	var geometry map[string]paneGeometry
+	// Validate all new PTYs before successful controls can perturb local
+	// layout. Reuse these exact dimensions in the subsequent helper handshake.
+	for _, pane := range order {
+		if !wanted[pane] {
+			continue
+		}
+		l := s.locks[pane]
+		if l != nil && l.refs == 0 {
+			idleSizes.Lock()
+			retired := l.retired
+			idleSizes.Unlock()
+			if retired {
+				s.stopLocked(pane, l)
+				l = nil
+			}
+		}
+		if l != nil {
 			select {
 			case <-l.done:
-				exists, err := s.paneExists(v.ctx, pane)
+				s.stopLocked(pane, l)
+				prepareSetup()
+				err := s.acquisitionErrorLocked(setup, pane, sizingUnavailable(errors.New("shared terminal size controller disconnected")))
 				if err != nil {
 					return err
 				}
-				if !exists {
-					delete(wanted, pane)
-					continue
-				}
-				return errors.New("shared terminal size controller disconnected")
+				delete(wanted, pane)
+				continue
 			default:
 			}
+			continue
 		}
-		if v.held[pane] {
+		prepareSetup()
+		query, stop := context.WithTimeout(setup, 3*time.Second)
+		terminal, size, err := s.bound.terminalGeometry(query, pane)
+		stop()
+		if err != nil {
+			if err = s.acquisitionErrorLocked(setup, pane, err); err != nil {
+				return err
+			}
+			delete(wanted, pane)
+			continue
+		}
+		if geometry == nil {
+			geometry = map[string]paneGeometry{}
+		}
+		geometry[pane] = paneGeometry{terminal: terminal, size: size}
+	}
+	for _, pane := range order {
+		if !wanted[pane] {
 			continue
 		}
 		l := s.locks[pane]
-		if l == nil {
-			if len(s.locks) >= 32 {
-				return errors.New("shared terminal sizing limit reached (32 panes)")
-			}
-			var err error
-			l, err = s.bound.holdSize(v.ctx, pane)
+		if l != nil && v.held[pane] && (v.heldLocks[pane] == nil || v.heldLocks[pane] == l) {
+			continue
+		}
+		if l != nil && l.refs == 0 && !s.reuseLocked(pane, l) {
+			// Capacity pressure may retire an idle helper during preflight.
+			prepareSetup()
+			query, stop := context.WithTimeout(setup, 3*time.Second)
+			terminal, size, err := s.bound.terminalGeometry(query, pane)
+			stop()
 			if err != nil {
-				exists, queryErr := s.paneExists(v.ctx, pane)
-				if queryErr == nil && !exists {
-					delete(wanted, pane)
-					continue
+				if err = s.acquisitionErrorLocked(setup, pane, err); err != nil {
+					return err
 				}
-				return fmt.Errorf("hold shared pane size: %w", err)
+				delete(wanted, pane)
+				continue
+			}
+			if geometry == nil {
+				geometry = map[string]paneGeometry{}
+			}
+			geometry[pane] = paneGeometry{terminal: terminal, size: size}
+			l = nil
+		}
+		if l == nil {
+			var err error
+			l, err = s.bound.holdSize(setup, lifetime, geometry[pane])
+			if err != nil {
+				if err = s.acquisitionErrorLocked(setup, pane, err); err != nil {
+					return err
+				}
+				delete(wanted, pane)
+				continue
 			}
 			s.locks[pane] = l
+			go s.watch(pane, l)
 		}
 		l.refs++
 		v.held[pane] = true
+		if v.heldLocks == nil {
+			v.heldLocks = map[string]*sizeLock{}
+		}
+		v.heldLocks[pane] = l
 	}
 	for pane := range v.held {
-		if wanted[pane] {
-			continue
+		if !wanted[pane] {
+			s.releaseLocked(pane, v.heldLocks[pane])
+			delete(v.held, pane)
+			delete(v.heldLocks, pane)
 		}
-		l := s.locks[pane]
-		l.refs--
-		if l.refs == 0 {
-			l.cancel()
-			<-l.done
-			delete(s.locks, pane)
-		}
-		delete(v.held, pane)
 	}
 	return nil
 }
-func (v *sizeView) close() { v.mu.Lock(); defer v.mu.Unlock(); v.active = false; _ = v.reconcile() }
+
+func (v *sizeView) close() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.active = false
+	v.sizing.mu.Lock()
+	defer v.sizing.mu.Unlock()
+	for pane := range v.held {
+		v.sizing.releaseLocked(pane, v.heldLocks[pane])
+		delete(v.held, pane)
+		delete(v.heldLocks, pane)
+	}
+}
 
 // Retain both old and requested tab locks until a successful response and the
 // matching snapshot (or a newer projection barrier) arrive. The two stream
@@ -368,14 +740,14 @@ func (v *sizeView) clientFrame(p []byte) ([]byte, error) {
 		}
 		if kind == "endpoint.hello.v1" {
 			if v.initialized {
-				return nil, errors.New("duplicate endpoint hello")
+				return nil, nativeProtocol(errors.New("duplicate endpoint hello"))
 			}
 			var hello map[string]any
 			if err := json.Unmarshal([]byte(data), &hello); err != nil {
-				return nil, err
+				return nil, nativeProtocol(err)
 			}
 			if hello["generation"] != float64(1) {
-				return nil, errors.New("unsupported Herdr endpoint generation")
+				return nil, nativeProtocol(errors.New("unsupported Herdr endpoint generation"))
 			}
 			v.active = hello["surface_active"] != false
 			v.requestedActive = v.active
@@ -406,17 +778,17 @@ func (v *sizeView) clientFrame(p []byte) ([]byte, error) {
 			} `json:"params"`
 		}
 		if err := json.Unmarshal([]byte(data), &request); err != nil {
-			return nil, err
+			return nil, nativeProtocol(err)
 		}
 		if strings.HasPrefix(request.ID, "bee-sizing:") {
-			return nil, errors.New("reserved sizing request id")
+			return nil, nativeProtocol(errors.New("reserved sizing request id"))
 		}
 		target := ""
 		switch request.Method {
 		case "client_shell.surface.set":
 			if request.Params.Active != nil {
 				if len(v.hide) >= 64 {
-					return nil, errors.New("too many pending surface operations")
+					return nil, nativeProtocol(errors.New("too many pending surface operations"))
 				}
 				v.activity++
 				v.requestedActive = *request.Params.Active
@@ -448,13 +820,13 @@ func (v *sizeView) clientFrame(p []byte) ([]byte, error) {
 		}
 		if target != "" {
 			if len(v.pending) >= 64 {
-				return nil, errors.New("too many pending tab navigations")
+				return nil, nativeProtocol(errors.New("too many pending tab navigations"))
 			}
 			if v.pending == nil {
 				v.pending = map[string]*navigation{}
 			}
 			if v.pending[request.ID] != nil {
-				return nil, errors.New("duplicate tab navigation id")
+				return nil, nativeProtocol(errors.New("duplicate tab navigation id"))
 			}
 			v.sequence++
 			v.pending[request.ID] = &navigation{tab: target, seq: v.sequence, since: time.Now()}
@@ -496,7 +868,7 @@ func (v *sizeView) serverFrame(p []byte) ([]byte, error) {
 				} `json:"result"`
 			}
 			if final[0] != 1 || json.Unmarshal([]byte(data), &response) != nil || len(response.Error) > 0 {
-				return nil, errors.New("Herdr rejected shared surface barrier")
+				return nil, nativeProtocol(errors.New("Herdr rejected shared surface barrier"))
 			}
 			if strings.HasPrefix(id, "bee-sizing:nav:") {
 				for _, n := range v.pending {
@@ -549,7 +921,7 @@ func (v *sizeView) serverFrame(p []byte) ([]byte, error) {
 	}
 	var snapshot shellSnapshot
 	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
-		return nil, err
+		return nil, nativeProtocol(err)
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -557,6 +929,7 @@ func (v *sizeView) serverFrame(p []byte) ([]byte, error) {
 		return p, nil
 	}
 	v.snapshot = snapshot
+	v.catalogSeen = false
 	v.settleNavigation()
 	if err := v.reconcile(); err != nil {
 		return nil, err

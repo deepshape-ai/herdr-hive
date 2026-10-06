@@ -264,7 +264,16 @@ func handle(ctx context.Context, n ssh.NewChannel, b herdr.Bound, kind string) {
 			return
 		}
 		go func() { ssh.DiscardRequests(reqs); local.Close() }()
-		if err := b.Relay(ctx, ch, local); err != nil && ctx.Err() == nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+		err := b.Relay(ctx, ch, local, func(failure *herdr.StreamFailure) {
+			payload, _ := json.Marshal(struct {
+				Code      string `json:"code"`
+				Retryable bool   `json:"retryable"`
+			}{failure.Code, failure.Retryable})
+			// SSH sideband only: native Herdr bytes and private error details never
+			// enter the failure envelope. Older Hives discard unknown requests.
+			_, _ = ch.SendRequest("stream-failure@herdr-hive/v1", false, payload)
+		})
+		if err != nil && ctx.Err() == nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			slog.Warn("shared session disconnected", "reason", err)
 		}
 

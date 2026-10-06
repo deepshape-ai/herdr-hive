@@ -77,8 +77,10 @@ Different keys represent different devices even when they share an IP or hostnam
    The aggregate endpoint decodes
    the frozen generation-1 codecs, namespaces resources, routes operations and
    retains bounded complete surfaces for switching. Neither path records terminals.
-8. Closing a consumer attachment closes its streams. Disabling publication closes
-   all its streams before acknowledgement. Local Herdr processes survive.
+8. Closing a consumer attachment closes its streams and releases its sizing
+   references. Bee owns the helpers independently and retains unused controls for
+   two seconds to absorb rapid reconnects. Disabling publication closes streams
+   and all helpers before acknowledgement. Local Herdr processes survive.
 9. Hive loss disconnects remote streams. Bee retries with bounded exponential delay;
    Hive restarts with an empty online directory. Valid re-registration restores the
    same IDs. Unknown protocol/config versions fail closed.
@@ -91,6 +93,18 @@ Bee checks bindings every second and withdraws a stale publication so the retry
 loop can bind the replacement endpoints automatically. Bytes already written into
 Herdr or terminal buffers cannot be recalled. Configuration changes currently
 reconnect the entire Bee publication, favoring simple ownership over partial updates.
+
+Aggregate recovery belongs to Hive, not Bee's native adapter. Each viewer retains
+bounded failure state keyed by share ID and publication generation. Transient
+failures retry after 1, 2, 4, 8 and at most 16 seconds; unchanged catalog entries
+and metadata handshakes do not erase this history. A persistent adapter/protocol
+failure quarantines only that generation for the affected viewer. A new generation
+or viewer can try again; ten seconds of active rendered progress permits recovery
+history to reset. Input and operations are never replayed. Bee communicates
+classification through an optional SSH sideband, keeping native bytes unchanged.
+Bee does not cache a viewer's adapter failure across connections: an explicitly new
+viewer uses current native resources, even if an earlier view hit a controller
+conflict. Controller idle grace is resource reuse, not failure cooldown.
 
 ## Native compatibility
 
@@ -153,8 +167,13 @@ See [the wire contract](../protocol/v1.md#session-scoped-cli-api-extension) and
 window capacity, persistent limits and OS-level protections. Connection and channel
 budgets are global, so adding consumers cannot create unbounded relay buffers.
 Bee additionally permits at most 32 sizing helper processes across published
-sessions. Each helper drains rendered frames (8 MiB record limit) and is released
-with its last viewer reference. Helpers add local process/rendering overhead; see
+sessions, including idle helpers. Each helper drains rendered frames (8 MiB record
+limit). Last-reference release starts a two-second grace period; rapid reacquisition
+reuses the exact helper, while capacity pressure can retire unused controls early.
+Pane removal and publication closure release helpers without grace. ClientShell
+snapshot revisions are per viewer, not publication-wide; cross-view pane deletion
+is reconciled through the local authoritative API rather than comparing revisions.
+Helpers add local process/rendering overhead; see
 [Bee sizing behavior and limitations](../bee/README.md#shared-terminal-sizing).
 
 Slow consumers backpressure the originating stream. Closing either side unblocks

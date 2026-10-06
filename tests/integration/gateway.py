@@ -380,8 +380,17 @@ def verify_shared_sizing(sshbase, shares, api, paths, root):
     try:
         local.hello();local.until(lambda tag,v:tag==20 and v.get('focused_tab_id'))
         first_tab=local.snapshot['focused_tab_id']
+        before_resize = size()
         resize(local,110,34);focus(local,first_tab)
-        baseline=size()
+        # A preceding aggregate viewer may have just released its controls.
+        # Establish the baseline only after bounded idle retirement lets this
+        # local resize reach the actual PTY.
+        deadline = time.monotonic() + 5
+        baseline = size()
+        while baseline == before_resize:
+            assert time.monotonic() < deadline, 'prior viewer prevented local PTY resize'
+            time.sleep(.05)
+            baseline = size()
         first=open_remote();resize(first,65,19);focus(first,first_tab)
         second=open_remote();resize(second,145,45);focus(second,first_tab)
         assert size()==baseline, 'remote arrival changed PTY size'
@@ -413,7 +422,10 @@ def verify_shared_sizing(sshbase, shares, api, paths, root):
         assert size(pane2)==destination, 'remote tab navigation failed to pin destination'
         focus(second,first_tab)
         resize(local,100,31);focus(local,tab2)
-        assert size(pane2)!=destination, 'departed remote tab stayed pinned'
+        deadline = time.monotonic() + 5
+        while size(pane2) == destination:
+            assert time.monotonic() < deadline, 'departed remote tab stayed pinned'
+            time.sleep(.05)
         # A pane created/closed while the Tab is shared must not kill the viewer.
         split=second.request('split-live','pane.split',{'target_pane_id':'w1:p1','direction':'right'})
         assert 'error' not in split, split
@@ -425,10 +437,13 @@ def verify_shared_sizing(sshbase, shares, api, paths, root):
         if any(p['pane_id']==split_pane for p in second.snapshot['panes']):
             second.until(lambda tag,v:tag==20 and all(p['pane_id']!=split_pane for p in v.get('panes',[])))
         focus(second,first_tab)
-        # Last viewer leaves: native local sizing resumes without restarting panes.
-        second.close();remotes.remove(second);time.sleep(.3)
+        # Last viewer leaves: bounded retirement restores native local sizing.
+        second.close();remotes.remove(second)
         focus(local,first_tab);resize(local,125,39);focus(local,first_tab)
-        assert size()!=baseline, 'last departure did not restore native sizing'
+        deadline = time.monotonic() + 5
+        while size() == baseline:
+            assert time.monotonic() < deadline, 'last departure did not restore native sizing'
+            time.sleep(.05)
         api(path,'tab.close',{'tab_id':tab2})
         controller=SocketWire(path)
         try:

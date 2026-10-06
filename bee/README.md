@@ -310,11 +310,13 @@ publication state.
 ## Shared terminal sizing
 
 Bee keeps terminal sizes stable while remote viewers have a tab open. The first
-remote view pins each pane's current PTY rows and columns; later viewers reuse
-those dimensions. Local and remote users retain input access. Background session
-discovery does not pin sizes. Leaving a tab, hiding the remote session, disconnecting
-or disabling sharing releases that viewer's references; the last viewer leaving
-restores Herdr's normal sizing. Herdr and Hive need no upgrade for this feature.
+remote view pins each pane's current PTY geometry, including pixel dimensions;
+later viewers reuse those dimensions and the same publication-owned controllers.
+Local and remote users retain input access. Background session discovery does not
+pin sizes. Leaving a tab, hiding the remote session or disconnecting releases that
+viewer's references. An unused controller remains available for two seconds so
+rapid reconnects do not detach and reattach it; then normal local sizing resumes.
+Disabling sharing or replacing the publication closes its controllers immediately.
 
 A smaller viewing window can crop content, including a prompt near the bottom;
 a larger window can leave unused space. Enlarge the viewing window to see the
@@ -324,13 +326,22 @@ reflow, not conflicting simultaneous input or application-generated redraws.
 
 The publisher uses the installed Herdr `terminal session control` CLI without
 `--takeover`, one helper per pinned terminal, at most 32 across the Bee process.
-It reads PTY geometry through the local process ID, `ps`, and a read-only terminal
-ioctl, and drains helper frames without retaining terminal history. The published
-session's API and client sockets must both remain available. An existing direct
-terminal controller is never displaced: a conflicting remote view disconnects
-and Bee logs the reason. After the controller is released, reconnect the view.
-A live pane losing its sizing helper also disconnects affected viewers; ordinary
-pane closure releases that pane without ending the rest of the session.
+Idle helpers count toward this limit and are reclaimed before rejecting new live
+controls. Bee reads PTY geometry through the local process ID, `ps`, and a read-only
+terminal ioctl, and drains helper frames without retaining terminal history.
+The published session's API and client sockets must both remain available.
+An existing direct terminal controller is never displaced: a conflicting remote
+view disconnects and Bee logs the local reason. A live pane losing its helper also
+disconnects affected viewers; ordinary pane closure does not end the session.
+
+Bee reports classified failures through an optional SSH channel request, not native
+Herdr bytes. An updated Hive quarantines a persistent failure for that viewer and
+publication generation instead of continuously reopening it. After resolving a
+controller conflict, reconnect the view. Older Hive versions ignore the report;
+older Bees remain usable with Hive's bounded transient recovery. Upgrade both
+components for classified recovery and controller reuse. No Herdr change is needed,
+but its controller API is not a passive mirror: the initial attach and final detach
+may still cause native layout/redraw work. This does not promise zero display flashes.
 
 ## Managed connection files
 

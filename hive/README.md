@@ -321,8 +321,19 @@ acknowledgements resume release-before-activation, followed by presentation fenc
 
 Source opening/hello writing has a 10-second initialization limit. After hello,
 welcome and the first snapshot must arrive within a further 10 seconds; the
-one-second membership tick enforces these limits. A silent or failed source is
-removed and retried independently without replaying input or requests. Frame
-queues are bounded, and SSH application writes and presentation fences have
-10-second hard limits. Only the latest complete screen per upstream leg is
-retained in memory; no transcript or terminal data is written to disk.
+one-second membership tick enforces these limits. Failure history survives source
+removal and catalog refresh for the same publication generation. Transient failures
+retry after 1, 2, 4, 8 and then at most 16 seconds. A persistent Bee failure report or
+native protocol violation quarantines only that source generation for the affected
+viewer. Resolve the failure and reconnect the view, or publish a fresh generation.
+Healthy sources remain usable. Ten seconds after valid active rendering and
+successful activation can reset backoff history; metadata alone cannot.
+
+Recovery does not replay input or requests. Channel-open cancellation keeps the
+publisher transport alive, permits only one outstanding open per publication and
+closes late successful opens. A peer failing to acknowledge channel closure can
+still force transport cleanup. Frame queues are bounded, and SSH application writes
+and presentation fences have 10-second hard limits. Only the latest complete screen
+per upstream leg is retained in memory; no transcript or terminal data is written
+to disk. Bee's optional failure sideband is backward-compatible; older publishers
+without it use bounded transient recovery.

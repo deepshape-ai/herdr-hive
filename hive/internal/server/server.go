@@ -49,11 +49,12 @@ type streamRequest struct {
 	Kind string `json:"kind"`
 }
 type binding struct {
-	share  Share
-	conn   *ssh.ServerConn
-	active map[ssh.Channel]bool
-	up     atomic.Uint64
-	down   atomic.Uint64
+	share   Share
+	conn    *ssh.ServerConn
+	active  map[ssh.Channel]bool
+	opening bool // Guarded by Server.mu; one pending native open per publication.
+	up      atomic.Uint64
+	down    atomic.Uint64
 }
 type Server struct {
 	Version, Executable                               string

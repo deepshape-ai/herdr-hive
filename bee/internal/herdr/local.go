@@ -33,6 +33,7 @@ type Bound struct {
 type boundLifetime struct {
 	sync.RWMutex
 	closed bool
+	done   chan struct{}
 	pins   []*os.File
 }
 
@@ -108,25 +109,40 @@ func Bind(s Session) (b Bound, err error) {
 	if err := b.Check(); err != nil {
 		return b, err
 	}
-	b.sizing = &Sizing{bound: b, locks: map[string]*sizeLock{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	b.sizing = &Sizing{bound: b, ctx: ctx, cancel: cancel, locks: map[string]*sizeLock{}}
 	return b, nil
 }
 
-// Close releases the publication's endpoint pins. It is safe on copied Bound
-// values and repeated calls. The owner must close after its handlers finish.
+// Close stops the publication's sizing helpers and releases its endpoint pins.
+// Copied Bound values share one close, including waiting for its completion.
 func (b Bound) Close() {
 	if b.lifetime == nil {
 		return
 	}
 	b.lifetime.Lock()
-	defer b.lifetime.Unlock()
 	if b.lifetime.closed {
+		done := b.lifetime.done
+		b.lifetime.Unlock()
+		if done != nil {
+			<-done
+		}
 		return
 	}
 	b.lifetime.closed = true
-	for _, pin := range b.lifetime.pins {
+	done := make(chan struct{})
+	b.lifetime.done = done
+	pins := b.lifetime.pins
+	b.lifetime.Unlock()
+	// Check takes the lifetime read lock while sizing owns its mutex. Never
+	// hold the lifetime lock while stopping helpers or cancelling setup.
+	if b.sizing != nil {
+		b.sizing.close()
+	}
+	for _, pin := range pins {
 		pin.Close()
 	}
+	close(done)
 }
 
 func (b Bound) Check() error {

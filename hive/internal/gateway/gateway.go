@@ -31,6 +31,7 @@ type retiredRequest struct {
 // Source.Open must honor cancellation, including while establishing a stream.
 type Source struct {
 	ID, Name, Label string
+	Generation      string
 	Open            func(context.Context) (io.ReadWriteCloser, error)
 }
 type Catalog func() []Source
@@ -48,6 +49,8 @@ type backend struct {
 	chunks        map[string][]byte
 	cancel        context.CancelFunc
 	initializeBy  time.Time
+	renderReady   bool
+	stableSince   time.Time
 }
 type event struct {
 	stream io.ReadWriteCloser
@@ -62,6 +65,8 @@ type session struct {
 	catalog          Catalog
 	events           chan event
 	sources          map[string]*backend
+	recovery         map[string]*recoveryRecord
+	clock            func() time.Time
 	active           *backend
 	boot             string
 	revision         uint64
@@ -173,7 +178,7 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 				continue
 			}
 			if ev.err != nil {
-				g.remove(b)
+				g.fail(b, ev.err)
 				if e := g.publish(); e != nil {
 					return e
 				}
@@ -181,14 +186,19 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 			}
 			if ev.stream != nil {
 				b.stream = ev.stream
-				b.initializeBy = time.Now().Add(initializationTimeout)
+				// The Open/hello/snapshot stages share one bounded deadline.
 				continue
 			}
 			if ev.data == nil {
 				continue
 			}
 			if e := g.server(b, ev.data); e != nil {
-				g.remove(b)
+				var failure *UpstreamFailure
+				var upstream *upstreamError
+				if !errors.As(e, &failure) && !errors.As(e, &upstream) {
+					return e
+				}
+				g.fail(b, e)
 				if e = g.publish(); e != nil {
 					return e
 				}
@@ -239,20 +249,42 @@ func (g *session) remove(b *backend) {
 	}
 }
 func (g *session) refresh() {
-	now := time.Now()
-	for _, b := range g.sources {
-		if !b.initializeBy.IsZero() && !now.Before(b.initializeBy) {
+	now := g.now()
+	list := g.catalog()
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	if len(list) > MaxSources {
+		list = list[:MaxSources]
+	}
+	visible := make(map[string]Source, len(list))
+	for _, src := range list {
+		visible[src.ID] = src
+	}
+	changed := false
+	// Publication removal/replacement is not a failure. Retire it before
+	// checking deadlines so an old generation cannot penalize the new one.
+	for id, b := range g.sources {
+		src, ok := visible[id]
+		if !ok || b.source.Generation != src.Generation {
 			g.remove(b)
-			if g.publish() != nil {
-				g.cancel()
-			}
+			changed = true
 		}
 	}
-	if g.fenceSource != nil && time.Now().After(g.fenceUntil) {
-		g.remove(g.fenceSource)
-		if g.publish() != nil {
-			g.cancel()
+	for id, record := range g.recovery {
+		src, ok := visible[id]
+		if !ok || record.generation != src.Generation {
+			delete(g.recovery, id)
 		}
+	}
+	for _, b := range g.sources {
+		g.resetRecovery(b, now)
+		if !b.initializeBy.IsZero() && !now.Before(b.initializeBy) {
+			g.fail(b, &upstreamError{errors.New("publisher initialization timed out")})
+			changed = true
+		}
+	}
+	if g.fenceSource != nil && !now.Before(g.fenceUntil) {
+		g.fail(g.fenceSource, &upstreamError{errors.New("publisher presentation timed out")})
+		changed = true
 	}
 	for id, t := range g.deadlines {
 		if !now.Before(t) {
@@ -263,10 +295,8 @@ func (g *session) refresh() {
 			delete(g.requestIDs, id)
 			delete(b.chunks, id)
 			if !ordinary {
-				g.remove(b)
-				if g.publish() != nil {
-					g.cancel()
-				}
+				g.fail(b, &upstreamError{errors.New("publisher surface acknowledgement timed out")})
+				changed = true
 				continue
 			}
 			g.retired[id] = retiredRequest{source: b}
@@ -275,21 +305,16 @@ func (g *session) refresh() {
 			}
 		}
 	}
-	list := g.catalog()
-	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
-	if len(list) > MaxSources {
-		list = list[:MaxSources]
-	}
-	visible := map[string]bool{}
-	changed := false
 	for _, src := range list {
-		visible[src.ID] = true
 		if old := g.sources[src.ID]; old != nil {
 			if old.source.Name != src.Name || old.source.Label != src.Label {
 				old.source.Name = src.Name
 				old.source.Label = src.Label
 				changed = true
 			}
+			continue
+		}
+		if record := g.recovery[src.ID]; record != nil && (record.blocked || now.Before(record.retryAt)) {
 			continue
 		}
 		ctx, cancel := context.WithCancel(g.ctx)
@@ -319,15 +344,9 @@ func (g *session) refresh() {
 			}
 			select {
 			case g.events <- event{source: b, err: e}:
-			case <-g.ctx.Done():
+			case <-ctx.Done():
 			}
 		}()
-	}
-	for id, b := range g.sources {
-		if !visible[id] {
-			g.remove(b)
-			changed = true
-		}
 	}
 	if changed {
 		if g.publish() != nil {
@@ -535,7 +554,7 @@ func (g *session) server(b *backend, p []byte) error {
 	case 20:
 		kind, data := d.text(), d.text()
 		if d.err != nil || d.p != len(p) {
-			return errWire
+			return protocolFailure()
 		}
 		if kind == "endpoint.presentation.ready.v1" {
 			if b == g.fenceSource && data == g.fence {
@@ -550,24 +569,24 @@ func (g *session) server(b *backend, p []byte) error {
 		// opaque; only the frozen welcome and snapshot kinds require JSON.
 		if kind != "endpoint.welcome.v1" && kind != "shell.snapshot.v1" {
 			if strings.HasPrefix(kind, "endpoint.surface-") || strings.HasPrefix(kind, "shell.surface.") || strings.HasPrefix(kind, "shell.snapshot.") {
-				return errors.New("publisher sent an unnegotiated rendering codec: " + kind)
+				return protocolFailure()
 			}
 			return nil
 		}
 		var v map[string]any
 		if len(data) > 256<<10 {
-			return errWire
+			return protocolFailure()
 		}
 		if json.Unmarshal([]byte(data), &v) != nil || v == nil {
-			return errWire
+			return protocolFailure()
 		}
 		switch kind {
 		case "endpoint.welcome.v1":
 			if b.welcomed {
-				return errWire
+				return protocolFailure()
 			}
 			if e := validateWelcome(v); e != nil {
-				return e
+				return protocolFailure()
 			}
 			b.welcomed = true
 			for _, m := range array(v["methods"]) {
@@ -577,20 +596,20 @@ func (g *session) server(b *backend, p []byte) error {
 			}
 		case "shell.snapshot.v1":
 			if !b.welcomed {
-				return errWire
+				return protocolFailure()
 			}
 			boot := stringVal(v["boot_id"])
 			if boot == "" {
-				return errWire
+				return protocolFailure()
 			}
 			if len(boot) > 128 {
-				return errWire
+				return protocolFailure()
 			}
 			if b.boot != "" && b.boot != boot {
-				return errWire
+				return protocolFailure()
 			}
 			b.boot = boot
-			hash := sha256.Sum256([]byte(b.source.ID + "\x00" + boot))
+			hash := sha256.Sum256([]byte(b.source.ID + "\x00" + b.source.Generation + "\x00" + boot))
 			b.prefix = "g" + hex.EncodeToString(hash[:8]) + "/"
 			b.snapshot = v
 			b.initializeBy = time.Time{}
@@ -599,17 +618,22 @@ func (g *session) server(b *backend, p []byte) error {
 		return nil
 	case 13, 19:
 		if !b.welcomed || b.snapshot == nil {
-			return errors.New("publisher sent a surface before initialization")
+			return protocolFailure()
 		}
 		if d.text() != b.boot || d.err != nil {
-			return errors.New("publisher surface has a stale boot identity")
+			return protocolFailure()
 		}
+		projection := d.num()
 		// Validate the complete fixed codec before retaining anything.
 		if _, e := surface(p, g.boot, g.revision, func(id string) string { return id }); e != nil {
-			return e
+			return protocolFailure()
 		}
 		if e := b.frame.update(p); e != nil {
-			return e
+			return protocolFailure()
+		}
+		if b.surfaceActive && projection == uint64(numberVal(b.snapshot["revision"])) {
+			b.renderReady = true
+			g.renderProgress(b)
 		}
 		if tag == 19 && b == g.active {
 			return g.sendPatch(b, p)
@@ -626,11 +650,11 @@ func (g *session) server(b *backend, p []byte) error {
 		final := d.raw(1)
 		data := d.text()
 		if d.err != nil || d.p != len(p) || boot != b.boot || len(final) != 1 || final[0] > 1 {
-			return errWire
+			return protocolFailure()
 		}
 		if retired, ok := g.retired[id]; ok {
 			if retired.source != b {
-				return errWire
+				return protocolFailure()
 			}
 			// The operation was not retried. Drain its late chunks without
 			// retaining data or exposing them to a reused consumer request ID.
@@ -640,14 +664,14 @@ func (g *session) server(b *backend, p []byte) error {
 			return nil
 		}
 		if g.pending[id] != b {
-			return errWire
+			return protocolFailure()
 		}
 		total := len(data)
 		for _, v := range b.chunks {
 			total += len(v)
 		}
 		if total > MaxFrame || (b.chunks[id] == nil && len(b.chunks) >= maxRequests+maxInternalRequests) {
-			return errWire
+			return protocolFailure()
 		}
 		b.chunks[id] = append(b.chunks[id], data...)
 		if len(final) == 0 || final[0] != 1 {
@@ -661,12 +685,13 @@ func (g *session) server(b *backend, p []byte) error {
 		delete(g.requestIDs, id)
 		var v any
 		if json.Unmarshal([]byte(data), &v) != nil {
-			return errWire
+			return protocolFailure()
 		}
 		if !ordinary {
 			if object(v) == nil || object(v)["error"] != nil {
-				return errors.New("publisher rejected surface interest")
+				return &upstreamError{errors.New("publisher rejected surface interest")}
 			}
+			g.renderProgress(b)
 			if e := g.syncInterest(); e != nil {
 				return e
 			}
@@ -676,18 +701,18 @@ func (g *session) server(b *backend, p []byte) error {
 		if obj := object(v); obj != nil {
 			obj["id"] = consumerID
 		} else {
-			return errWire
+			return protocolFailure()
 		}
 		return g.response(consumerID, v)
 	case 3:
-		return io.EOF
+		return &upstreamError{io.EOF}
 	case 4, 14:
 		// Aggregate viewers observe remote agent state through snapshots. Do not
 		// mix remote completion/attention sounds and toasts into the viewer's
 		// local notifications. Validate the frozen codec before discarding it.
 		d.notification(tag)
 		if d.err != nil || d.p != len(p) {
-			return errWire
+			return protocolFailure()
 		}
 		return nil
 	case 5, 6, 8, 9, 15, 17:
@@ -697,8 +722,9 @@ func (g *session) server(b *backend, p []byte) error {
 		if b == g.active && g.surfaceActive {
 			return Write(g.out, p)
 		}
+		return nil
 	}
-	return nil
+	return protocolFailure()
 }
 func (g *session) response(id string, v any) error {
 	data, e := json.Marshal(v)
@@ -723,11 +749,15 @@ func (g *session) resolve(id string) (*backend, string) {
 	return nil, ""
 }
 func (g *session) send(b *backend, p []byte) error {
-	if b == nil || b.stream == nil {
+	if b == nil {
 		return errors.New("shared session is offline")
 	}
+	if b.stream == nil {
+		g.fail(b, &upstreamError{errors.New("shared session is offline")})
+		return g.publish()
+	}
 	if e := Write(b.stream, p); e != nil {
-		g.remove(b)
+		g.fail(b, e)
 		return g.publish()
 	}
 	return nil
@@ -855,6 +885,9 @@ func (g *session) client(p []byte) error {
 				return e
 			}
 		}
+		if g.sources[target.source.ID] != target {
+			return g.failure(id, "sharing disconnected")
+		}
 		if g.requestSequence == ^uint64(0) {
 			return g.failure(id, "request identity space exhausted")
 		}
@@ -863,7 +896,7 @@ func (g *session) client(p []byte) error {
 		v["id"] = wireID
 		g.pending[wireID] = target
 		g.requestIDs[wireID] = id
-		g.deadlines[wireID] = time.Now().Add(operationTimeout)
+		g.deadlines[wireID] = g.now().Add(operationTimeout)
 		q, _ := json.Marshal(v)
 		out := append([]byte{15}, str(target.boot)...)
 		out = append(out, str(string(q))...)
@@ -888,7 +921,7 @@ func (g *session) client(p []byte) error {
 		for _, b := range g.sources {
 			if b.stream != nil {
 				if e := g.send(b, p); e != nil {
-					g.remove(b)
+					return e
 				}
 			}
 		}
@@ -966,6 +999,6 @@ func (g *session) resumeFence() error {
 		return nil
 	}
 	g.fenceSource = g.active
-	g.fenceUntil = time.Now().Add(10 * time.Second)
+	g.fenceUntil = g.now().Add(10 * time.Second)
 	return g.send(g.active, control("endpoint.presentation.sync.v1", []byte(g.fence)))
 }

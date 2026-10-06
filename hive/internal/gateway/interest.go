@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -34,7 +33,8 @@ func (g *session) syncInterest() error {
 
 func (g *session) setInterest(b *backend, active bool) error {
 	if !b.methods["client_shell.surface.set"] {
-		return errors.New("publisher does not support surface interest")
+		g.fail(b, protocolFailure())
+		return g.publish()
 	}
 	if len(g.pending)-len(g.requestIDs) >= maxInternalRequests {
 		// Retain only the latest desired state in g.active/g.surfaceActive.
@@ -56,7 +56,9 @@ func (g *session) setInterest(b *backend, active bool) error {
 	v, _ := json.Marshal(map[string]any{"id": id, "method": "client_shell.surface.set", "params": map[string]any{"active": active}})
 	p := append(append([]byte{15}, str(b.boot)...), str(string(v))...)
 	g.pending[id] = b
-	g.deadlines[id] = time.Now().Add(operationTimeout)
+	g.deadlines[id] = g.now().Add(operationTimeout)
 	b.surfaceActive = active
+	b.renderReady = false
+	b.stableSince = time.Time{}
 	return g.send(b, p)
 }

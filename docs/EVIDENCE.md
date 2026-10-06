@@ -4,6 +4,44 @@
 No production deployment has been performed. Real test-host
 addresses, credentials and terminal recordings are excluded from this repository.
 
+## Issue #1 recovery repair (Hive 0.4.5 / Bee 0.4.3)
+
+- The old `c884dc0` implementation fails assertion-based regressions: rapid
+  last-view disconnect destroys its controller; repeated source-open failure
+  performs six opens in 5.5 seconds; an unnegotiated native codec reopens three
+  times instead of quarantining once. Tests use the old public API and compile
+  on the baseline, so these are behavioral failures, not interface errors.
+- Real Herdr 0.9.1 with baseline Hive/Bee binaries fails the new attachment
+  acceptance on exact controller reuse. The final candidate passes `native.py`,
+  `attachments.py`, `remote_cli.py` and `panel.py` sequentially against official,
+  checksum-verified Herdr 0.9.0, 0.9.1, 0.9.2 and 0.9.3 on macOS arm64.
+  Each attachment run passes 100 rapid last-viewer reconnects with the same eight
+  controller processes, unchanged complete PTY geometry, eventual local-size
+  restoration and no persistent conflict retry during the 12-second observation.
+- The full Herdr 0.9.1 native acceptance also passes with an unchanged Bee built
+  from baseline `c884dc0` and the candidate Hive, including later publisher
+  executable upgrade. Classified quarantine requires the optional report from
+  an updated Bee; older publishers remain interoperable.
+- Final Bee/Hive race suites and vet pass; the shared updater race suite/vet,
+  shell syntax check and all nine offline installer tests also pass. The Bee
+  cross-view membership/fresh-view recovery tests pass 100 repetitions across
+  `-cpu=1,2`; the actual SSH sideband and pending-open tests pass 20 repetitions
+  across both CPU settings. Candidate native packages build successfully.
+- A candidate-wide Bee failure cooldown was rejected during implementation:
+  real native acceptance and an assertion-red fresh-view transition test showed
+  it poisoning a new viewer after the controller recovered. Final Bee retains
+  resource grace, not failure history; that transition now passes. Cross-view
+  membership tests also cover fresh low-revision projections, stale viewers and
+  removed idle panes without evicting healthy controls.
+- CI includes the attachment regression in the existing pinned/scheduled native
+  matrix. These are local verification results, not claims of hosted CI execution
+  or a new published release.
+- This establishes controller reuse and bounded aggregate recovery, not the
+  reporter's precise initial failure or physical display behavior. Native
+  `terminal session control` still acquires an exclusive size controller; its
+  initial attach/final detach can schedule native layout and redraw. No passive
+  mirror capability is assumed or added to Herdr.
+
 ## Passed
 
 - `make test`: both independent Go modules pass under the race detector.

@@ -15,7 +15,7 @@ import (
 // Only generation-1 hello, navigation requests and snapshots are inspected.
 const maxSizingFrame = 32 << 20
 
-var errSizingWire = errors.New("invalid Herdr sizing frame")
+var errSizingWire = nativeProtocol(errors.New("invalid Herdr sizing frame"))
 
 func writeSizingFrame(w io.Writer, b []byte) error {
 	var h [4]byte
@@ -71,10 +71,10 @@ func (d *wireDecoder) number() uint64 {
 }
 func (d *wireDecoder) text() string { return string(d.take(d.number())) }
 
-// Relay keeps sizing references until both stream directions have stopped.
-// Closing either side or cancelling publication releases all helpers, including
-// while a consumer is not reading output. No input is replayed on reconnect.
-func (b Bound) Relay(ctx context.Context, remote io.ReadWriteCloser, local net.Conn) error {
+// Relay preserves each viewer's native stream and releases only its sizing
+// references on disconnect. The publication owns helper retirement. Failure
+// sidebands are reported before closure; no input is replayed on reconnect.
+func (b Bound) Relay(ctx context.Context, remote io.ReadWriteCloser, local net.Conn, reportFailure func(*StreamFailure)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	v := &sizeView{sizing: b.sizing, ctx: ctx, held: map[string]bool{}, firstReady: make(chan struct{})}
@@ -120,6 +120,10 @@ func (b Bound) Relay(ctx context.Context, remote io.ReadWriteCloser, local net.C
 			err = ctx.Err()
 			waiting = false
 		}
+	}
+	var failure *StreamFailure
+	if reportFailure != nil && ctx.Err() == nil && errors.As(err, &failure) {
+		reportFailure(failure)
 	}
 	cancel()
 	local.Close()
