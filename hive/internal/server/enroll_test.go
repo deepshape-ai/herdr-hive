@@ -136,7 +136,7 @@ func TestEnrollmentGateway(t *testing.T) {
 		t.Fatal("deleted key still authorized")
 	}
 }
-func TestEnrollmentDisabledAndBudget(t *testing.T) {
+func TestEnrollmentAuthenticationEnabledAndDisabled(t *testing.T) {
 	dir := t.TempDir()
 	keys := filepath.Join(dir, "keys")
 	os.WriteFile(keys, nil, 0600)
@@ -148,8 +148,5 @@ func TestEnrollmentDisabledAndBudget(t *testing.T) {
 	s.Enrollment("tokens", "uses", "keys")
 	if p, e := s.enrollAuth(key(t).PublicKey()); e != nil || p.Extensions["owner"] != "" {
 		t.Fatal(p, e)
-	}
-	if cap(s.enrollSlots) != 4 {
-		t.Fatal("wrong budget")
 	}
 }

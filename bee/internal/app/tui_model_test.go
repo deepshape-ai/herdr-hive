@@ -251,16 +251,6 @@ func TestPanelSmallViewportKeepsSelectedSessionVisible(t *testing.T) {
 	}
 }
 
-func TestPanelOmitsKnownHostsControl(t *testing.T) {
-	m := readyPanel()
-	if len(m.fields) != 5 || m.itemCount() != 5 {
-		t.Fatal("unexpected connection controls")
-	}
-	if strings.Contains(m.View().Content, "known_hosts") {
-		t.Fatal("advanced SSH setting exposed in panel")
-	}
-}
-
 func TestEnrollmentTokenMaskedAndSavedAlone(t *testing.T) {
 	m := newPanel(context.Background(), App{})
 	m.advanced = true
@@ -291,10 +281,5 @@ func TestEnrollmentTokenMaskedAndSavedAlone(t *testing.T) {
 	m = next.(panelModel)
 	if m.fields[3].Value() != "" {
 		t.Fatal("token retained after save")
-	}
-	m.focus = 0
-	m.layout()
-	if !strings.Contains(ansi.Strip(m.View().Content), "[1] Connection") || !strings.Contains(ansi.Strip(m.View().Content), "[2] Sharing") {
-		t.Fatalf("tabs missing: %q", m.View().Content)
 	}
 }

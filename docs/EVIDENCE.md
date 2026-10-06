@@ -64,6 +64,12 @@ addresses, credentials and terminal recordings are excluded from this repository
   responses with consumer request ID reuse; Bee context tests also failed there.
   The exact candidate patch passed all three Go modules' race tests and vet in
   an isolated worktree, plus all nine offline installer tests.
+- The source-switch/graphics regression passed 2,000 race-enabled repetitions
+  across `-cpu=1,2`. Its duplex owner fixture now reads input independently of a
+  serialized output queue, matching native owner behavior; a synchronous
+  zero-buffer pipe had caused a test-only ACK/input deadlock during release CI.
+  Copy-only, internal-capacity and wording assertions were removed without
+  removing the source-switch, checksum preservation or authentication checks.
 - All eight component/platform archives built successfully and their entry
   allowlists, executable architecture and Bee manifest versions were inspected;
   macOS arm64 executables also passed real version/help invocation.

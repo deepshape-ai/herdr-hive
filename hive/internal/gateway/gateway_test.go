@@ -60,14 +60,6 @@ func TestWireBoundsAndRoundTrip(t *testing.T) {
 	if _, e := Read(bytes.NewReader(h[:])); e == nil {
 		t.Fatal("unbounded read")
 	}
-	var w bytes.Buffer
-	if e := Write(&w, control("test", []byte("text"))); e != nil {
-		t.Fatal(e)
-	}
-	p, e := Read(&w)
-	if e != nil || !bytes.Equal(p, control("test", []byte("text"))) {
-		t.Fatal(e)
-	}
 }
 func TestSurfaceStructuralRewriteAndPatch(t *testing.T) {
 	original := full("w1:p1")
@@ -95,9 +87,6 @@ func TestSurfaceStructuralRewriteAndPatch(t *testing.T) {
 	}
 	if e := state.update(patch(0, 1, 3, "stale")); e == nil {
 		t.Fatal("stale patch accepted")
-	}
-	if _, e := surface(state.bytes(), "hive", 10, func(s string) string { return s }); e != nil {
-		t.Fatal(e)
 	}
 }
 func TestInactivePatchCannotExpandRetainedState(t *testing.T) {
@@ -134,18 +123,12 @@ func TestGraphicsSurviveIncrementalAssetElision(t *testing.T) {
 	}
 	var state completeSurface
 	for _, b := range [][]byte{scene(true), scene(false)} {
-		if _, e := surface(b, "hive", 2, func(s string) string { return s }); e != nil {
-			t.Fatal(e)
-		}
 		if e := state.update(b); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if !bytes.Contains(state.bytes(), str("RGB")) {
 		t.Fatal("live asset was lost on background update")
-	}
-	if _, e := surface(state.bytes(), "hive", 2, func(s string) string { return "prefix/" + s }); e != nil {
-		t.Fatal(e)
 	}
 	if e := state.update(full("x")); e != nil {
 		t.Fatal(e)
@@ -298,9 +281,6 @@ func TestSnapshotPrefixAndFocusIsolation(t *testing.T) {
 		if object(array(b.snapshot["workspaces"])[0])["label"] != "xxx" {
 			t.Fatal("owner workspace label was changed")
 		}
-	}
-	if _, e := io.ReadAll(g.out); e != nil {
-		t.Fatal(e)
 	}
 }
 

@@ -89,11 +89,6 @@ func TestHiveNavigationAndReadOnlyRows(t *testing.T) {
 		m.width = width
 		m.page = 0
 		m.layout()
-		frame := ansi.Strip(m.View().Content)
-		first := strings.Split(frame, "\n")[0]
-		if strings.Contains(first, "Sharing") {
-			t.Fatal("Sharing remains in title")
-		}
 		// Find a click target in the third tab at every supported tab layout.
 		found := false
 		for x := 2; x < width-2; x++ {

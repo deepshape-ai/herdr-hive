@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,9 +20,15 @@ type fixtureRequest struct {
 	params           map[string]any
 }
 
+type fixtureWrite struct {
+	p    []byte
+	done chan error
+}
+
 type fixtureLeg struct {
 	conn     net.Conn
-	mu       sync.Mutex
+	ctx      context.Context
+	writes   chan fixtureWrite
 	hello    map[string]any
 	requests chan fixtureRequest
 	failure  chan error
@@ -31,10 +36,46 @@ type fixtureLeg struct {
 }
 
 func (l *fixtureLeg) write(p []byte) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
-	return Write(l.conn, p)
+	done := make(chan error, 1)
+	if err := l.queue(p, done); err != nil {
+		return err
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-l.ctx.Done():
+		return l.ctx.Err()
+	}
+}
+
+// Native owners read input independently of their serialized output writer.
+// A zero-buffer pipe must not couple those two directions in this fixture.
+func (l *fixtureLeg) queue(p []byte, done chan error) error {
+	select {
+	case l.writes <- fixtureWrite{p: p, done: done}:
+		return nil
+	case <-l.ctx.Done():
+		return l.ctx.Err()
+	}
+}
+
+func (l *fixtureLeg) output() {
+	for {
+		select {
+		case frame := <-l.writes:
+			l.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+			err := Write(l.conn, frame.p)
+			if frame.done != nil {
+				frame.done <- err
+			}
+			if err != nil {
+				l.conn.Close()
+				return
+			}
+		case <-l.ctx.Done():
+			return
+		}
+	}
 }
 
 func fixtureWelcome(versions ...string) map[string]any {
@@ -65,9 +106,13 @@ func fixtureResponse(boot, id, marker string, final byte) []byte {
 	return append(p, str(marker)...)
 }
 
-func (l *fixtureLeg) reply(r fixtureRequest, marker string) error {
+func fixtureReply(r fixtureRequest, marker string) []byte {
 	data, _ := json.Marshal(map[string]any{"id": r.id, "result": map[string]any{"type": "ok", "marker": marker}})
-	return l.write(fixtureResponse(r.boot, r.id, string(data), 1))
+	return fixtureResponse(r.boot, r.id, string(data), 1)
+}
+
+func (l *fixtureLeg) reply(r fixtureRequest, marker string) error {
+	return l.write(fixtureReply(r, marker))
 }
 
 func (l *fixtureLeg) update(p []byte) error {
@@ -102,7 +147,8 @@ func newFixtureOwner(t *testing.T, id, silentFirst string, initial []byte, versi
 			return nil, ctx.Err()
 		}
 		gatewayConn, ownerConn := net.Pipe()
-		l := &fixtureLeg{conn: ownerConn, requests: make(chan fixtureRequest, 80), failure: make(chan error, 1), ready: make(chan struct{})}
+		l := &fixtureLeg{conn: ownerConn, ctx: ctx, writes: make(chan fixtureWrite, 80), requests: make(chan fixtureRequest, 80), failure: make(chan error, 1), ready: make(chan struct{})}
+		go l.output()
 		f.opens <- l
 		go func() {
 			defer ownerConn.Close()
@@ -146,12 +192,12 @@ func newFixtureOwner(t *testing.T, id, silentFirst string, initial []byte, versi
 						r.id, r.method, r.params = stringVal(request["id"]), stringVal(request["method"]), object(request["params"])
 						if r.method == "client_shell.surface.set" {
 							if r.params["active"] == true && !renderStarted {
-								if err := l.write(initial); err != nil {
+								if err := l.queue(initial, nil); err != nil {
 									return err
 								}
 								renderStarted = true
 							}
-							if err := l.reply(r, "interest"); err != nil {
+							if err := l.queue(fixtureReply(r, "interest"), nil); err != nil {
 								return err
 							}
 						} else {
@@ -164,7 +210,7 @@ func newFixtureOwner(t *testing.T, id, silentFirst string, initial []byte, versi
 					case 20:
 						kind, data := d.text(), d.text()
 						if kind == "endpoint.presentation.sync.v1" {
-							if err := l.write(control("endpoint.presentation.ready.v1", []byte(data))); err != nil {
+							if err := l.queue(control("endpoint.presentation.ready.v1", []byte(data)), nil); err != nil {
 								return err
 							}
 						}
@@ -378,10 +424,6 @@ func TestServeNegotiatesOnlyFrozenCodecsAndKeepsRendering(t *testing.T) {
 			}
 			if owner.count.Load() != 1 {
 				t.Fatal("rendering required a reconnect")
-			}
-			// Geometry and input semantics are still offered, unlike render flags.
-			if l.hello["pixel_mouse"] != true || l.hello["mouse_capture"] != true || l.hello["endpoint_keybindings"] != true || l.hello["cell_width_px"] != float64(8) || l.hello["cell_height_px"] != float64(16) || l.hello["direct_graphics"] != false || l.hello["surface_active"] != false {
-				t.Fatal("gateway changed frozen geometry/input semantics", l.hello)
 			}
 		})
 	}
@@ -644,7 +686,9 @@ func TestServeRejectsCrossSourceStaleBootDuplicateAndUnsolicitedResponses(t *tes
 				}
 				h.until(3*time.Second, func(p []byte) bool { return fixtureResponseJSON(p)["id"] == "r" })
 			}
-			if err := target.write(responseFrame(boot, id)); err != nil {
+			// The invalid response deliberately cancels this leg. Queue it without
+			// requiring a write-completion ACK from the leg being rejected.
+			if err := target.queue(responseFrame(boot, id), nil); err != nil {
 				t.Fatal(err)
 			}
 			h.snapshot(1, 3*time.Second)

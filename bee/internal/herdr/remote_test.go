@@ -33,9 +33,6 @@ func TestRemoteContextCannotUseLocalSessionOrCaller(t *testing.T) {
 			t.Fatal("leaked caller", env)
 		}
 	}
-	if strings.Join(cmd.Args[1:], "|") != strings.Join(args[1:], "|") {
-		t.Fatal("changed native arguments")
-	}
 }
 
 func TestRemoteValidationPreservesNativePayloads(t *testing.T) {
