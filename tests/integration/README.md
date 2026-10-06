@@ -2,8 +2,9 @@
 
 Run from the repository root. The test account must be dedicated to testing.
 Tests never attach to existing Herdr sessions or modify user SSH configuration.
-They refuse to reuse `.r`, create disposable identities and sessions there, and
-remove their temporary installation on exit. Do not run these scripts concurrently.
+The full native acceptance test creates a short private directory under `/tmp`.
+Other scripts use their own disposable test directories and refuse to reuse them.
+All remove their temporary installations on exit. Do not run these scripts concurrently.
 
 ```sh
 make package
@@ -15,10 +16,18 @@ python3 tests/integration/panel.py
 
 Native integration requires compatible Herdr 0.9.0 or newer and OpenSSH.
 
+CI runs the full native suite against checksum-pinned Herdr 0.9.0, 0.9.1, 0.9.2
+and 0.9.3 on branch/PR/release builds. Weekly and manually dispatched CI runs
+check the minimum version and the latest official stable release, requiring
+GitHub's asset SHA-256 before executing it. A future release must still offer
+generation 1 and the frozen required codecs; version numbers alone are not a
+compatibility guarantee.
+
 `python3 -B tests/integration/remote_cli.py` independently verifies the CLI API
 route using three disposable Bees, real Hive/Herdr binaries and a deterministic
 foreground agent fixture. It covers A→B, B→C and C→A native agent creation,
 prompt/wait/read, same-name isolation, concurrent B/C calls, tab/pane management,
+explicit pane focus and rejection of `--current` without moving the owner's focus,
 native exit codes, private-target rejection and unsharing. The agent fixture
 uses real Herdr reporting/detection but makes no paid inference requests and
 needs no agent account. All sessions, keys, binaries and sockets live under a
@@ -37,6 +46,12 @@ remote viewers: fixed sizes across focus/input/resize, independent tabs, remote
 tab switches, pane closure, last-viewer release and existing-controller conflicts.
 `BEE_NATIVE_TEST_BINARY=/absolute/path/to/bee` substitutes an installed Bee binary
 for the publisher under test, while retaining disposable sessions and identities.
+Terminal output assertions reconstruct ANSI screen updates rather than requiring
+complete markers in raw incremental byte chunks.
+An independent full/patch decoder checks sustained scrolling output with modern
+optional hello flags, continuous source visibility, complete source-switch replay,
+and upstream stream accounting/release. Hive deliberately negotiates only its
+implemented frozen codec, even when a viewer offers newer optional encodings.
 
 An isolated OpenSSH config wrapper only redirects config lookup; it does not
 replace Herdr, its protocol, or the SSH executable.

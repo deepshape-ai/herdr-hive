@@ -297,7 +297,10 @@ func (s *completeSurface) update(b []byte) error {
 	} else if tag == 19 {
 		base := d.num()
 		rev := d.num()
-		if s.header == nil || base != s.revision {
+		header := decoder{b: s.header}
+		header.num()
+		oldBoot, oldProjection := header.text(), header.num()
+		if s.header == nil || header.err != nil || boot != oldBoot || projection != oldProjection || base != s.revision || base == ^uint64(0) || rev != base+1 {
 			return errWire
 		}
 		d.many(func() {

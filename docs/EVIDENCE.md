@@ -42,6 +42,38 @@ addresses, credentials and terminal recordings are excluded from this repository
 - Restart is requested through private local IPC. A privileged Hive updater never
   signals a PID supplied by the service. Unexpected control operations are rejected.
 
+## Herdr compatibility acceptance (Hive 0.4.4 / Bee 0.4.2)
+
+- Local macOS arm64 runs of `native.py`, `remote_cli.py` and `panel.py` passed
+  against official Herdr 0.9.0, 0.9.1, 0.9.2 and 0.9.3 binaries.
+- The same native suite passed with checksum-verified published Bee 0.4.1
+  publishers and the candidate Hive, including subsequent Bee process replacement;
+  the aggregate fix does not require a simultaneous Bee upgrade.
+- Modern viewers offering optional render flags retained all three publishers
+  during 80 rows of scrolling output, with 80 or 81 independently decoded surface
+  updates. Switching away and back required new destination-specific rendered
+  scenes, not the pre-switch cached screen.
+- Inspect accounted for three additional upstream streams during the viewer's
+  lifetime and zero after closure. Real CLI text separately displayed the viewer,
+  upstream and ordinary channel budgets.
+- Explicit remote pane focus succeeded; a subsequent `--current` request was
+  rejected without changing the owner's focused pane. Literal command data and
+  command-specific option boundaries have regression coverage.
+- New public gateway tests failed against the previous implementation for modern
+  codec negotiation, silent initialization recovery, incremental patches and late
+  responses with consumer request ID reuse; Bee context tests also failed there.
+  The exact candidate patch passed all three Go modules' race tests and vet in
+  an isolated worktree, plus all nine offline installer tests.
+- All eight component/platform archives built successfully and their entry
+  allowlists, executable architecture and Bee manifest versions were inspected;
+  macOS arm64 executables also passed real version/help invocation.
+- CI now tests pinned 0.9.0 through 0.9.3 releases and separately checks the
+  minimum plus latest stable release weekly or on manual dispatch.
+
+These runs cover the supported frozen fallback, not arbitrary future protocol
+generations, optional delta/scroll codecs, physical display latency or a capacity
+soak. Hosted CI and published artifacts require separate release verification.
+
 ## Measurements
 
 One LAN test used two connected native terminals and sampled 20 command completions

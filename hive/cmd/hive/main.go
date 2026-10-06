@@ -220,6 +220,7 @@ func inspect(args []string) error {
 				fmt.Print("\x1b[2J\x1b[H")
 			}
 			fmt.Printf("Hive · %ds uptime\nSSH connections %d/%d · channels %d/%d · rejected %d\nGo heap %.1f MiB · runtime %.1f MiB · goroutines %d · registry %d B\n\n", s.UptimeSeconds, s.Connections, s.MaxConnections, s.Channels, s.MaxChannels, s.Rejected, float64(s.HeapBytes)/(1<<20), float64(s.RuntimeBytes)/(1<<20), s.Goroutines, s.RegistryBytes)
+			fmt.Printf("Gateway: viewers %d/%d · upstream streams %d/%d (additional to consumer channels)\n", s.GatewayViewers, s.MaxGatewayViewers, s.GatewayUpstreams, s.MaxGatewayUpstreams)
 			fmt.Printf("Enrollment: enabled=%t accepted=%d rejected=%d\n", s.EnrollEnabled, s.Enrolled, s.EnrollRejected)
 			for _, d := range s.Shares {
 				fmt.Printf("%s  %s / %s  connections=%d  up=%d B  down=%d B\n", d.ID, d.Name, d.Session, d.Connections, d.ToPublisher, d.ToConsumer)

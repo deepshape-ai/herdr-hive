@@ -70,3 +70,89 @@ func TestRemoteValidationStillRejectsActualContextOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestRemotePaneFocusRejectsCurrentSelector(t *testing.T) {
+	for _, args := range [][]string{
+		{"herdr", "pane", "focus", "--direction", "right", "--current"},
+		{"herdr", "pane", "focus", "--pane", "w1:p1", "--direction", "right", "--current"},
+		{"herdr", "pane", "focus", "--direction", "right", "--current", "--pane", "w1:p1"},
+	} {
+		t.Run(strings.Join(args[3:], " "), func(t *testing.T) {
+			if err := ValidateRemoteCommand(args); err == nil {
+				t.Fatal("accepted local-context selector", args)
+			}
+		})
+	}
+	for _, args := range [][]string{
+		{"herdr", "pane", "focus", "--pane", "w1:p1", "--direction", "right"},
+		{"herdr", "pane", "focus", "--direction", "left", "--pane", "w1:p2"},
+	} {
+		if err := ValidateRemoteCommand(args); err != nil {
+			t.Fatalf("rejected explicit remote focus %q: %v", args, err)
+		}
+	}
+}
+
+func TestRemoteValidationNativeContextGrammar(t *testing.T) {
+	for _, args := range [][]string{
+		{"herdr", "pane", "current", "--pane", "w1:p1", "--current"},
+		{"herdr", "pane", "layout", "--pane", "w1:p1", "--current"},
+		{"herdr", "pane", "process-info", "--pane", "w1:p1", "--current"},
+		{"herdr", "pane", "neighbor", "--direction", "right", "--pane", "w1:p1", "--current"},
+		{"herdr", "pane", "resize", "--pane", "w1:p1", "--direction", "up", "--amount", "0.1", "--current"},
+		{"herdr", "pane", "zoom", "w1:p1", "--on", "--current"},
+		{"herdr", "pane", "input", "--current", "--right-click=pane"},
+		{"herdr", "pane", "split", "w1:p1", "--direction", "down", "--right-click=pane", "--current"},
+		{"herdr", "pane", "swap", "--pane", "w1:p1", "--direction", "right", "--current"},
+		{"herdr", "pane", "split", "w1:p1", "--direction", "down", "--env", "KEY=--current", "--cwd", "relative"},
+		{"herdr", "tab", "create", "--workspace", "w1", "--label", "--current", "--cwd", "relative"},
+		{"herdr", "agent", "explain", "--agent", "--current", "--file", "/tmp/local"},
+		{"herdr", "workspace", "create", "--cwd=relative"},
+		{"herdr", "tab", "create", "--cwd=relative"},
+		{"herdr", "pane", "split", "w1:p1", "--env=KEY=--current", "--cwd=relative"},
+		{"herdr", "agent", "explain", "--file=/tmp/local", "--agent=codex"},
+		{"herdr", "pane", "focus", "--pane=w1:p1", "--direction=right", "--current"},
+		{"herdr", "pane", "focus", "--current=true", "--pane=w1:p1"},
+		// These native context parsers do not use -- as an option terminator.
+		{"herdr", "pane", "focus", "--direction", "right", "--", "--current"},
+		{"herdr", "tab", "create", "--label", "--", "--cwd", "relative"},
+	} {
+		t.Run("reject/"+strings.Join(args[1:], " "), func(t *testing.T) {
+			if err := ValidateRemoteCommand(args); err == nil {
+				t.Fatal("accepted actual local-context option", args)
+			}
+		})
+	}
+	for _, args := range [][]string{
+		{"herdr", "pane", "current", "--pane", "w1:p1"},
+		{"herdr", "pane", "layout", "--pane", "w1:p1"},
+		{"herdr", "pane", "process-info", "--pane", "w1:p1"},
+		{"herdr", "pane", "neighbor", "--pane", "w1:p1", "--direction", "right"},
+		{"herdr", "pane", "resize", "--pane", "w1:p1", "--direction", "up", "--amount", "0.1"},
+		{"herdr", "pane", "zoom", "w1:p1", "--on"},
+		{"herdr", "pane", "input", "--pane=w1:p1", "--right-click=pane"},
+		{"herdr", "pane", "split", "w1:p1", "--direction", "down", "--right-click=pane", "--env", "KEY=--current", "--cwd", "/srv/project"},
+		{"herdr", "pane", "swap", "--source-pane", "w1:p1", "--target-pane", "w1:p2"},
+		{"herdr", "workspace", "create", "--label", "--file", "--cwd", "/srv/project"},
+		{"herdr", "tab", "create", "--workspace", "w1", "--label", "--current", "--cwd", "/srv/project"},
+		{"herdr", "agent", "explain", "reviewer", "--format", "json"},
+		{"herdr", "pane", "send-text", "w1:p1", "--current", "--file"},
+		{"herdr", "pane", "run", "w1:p1", "tool", "--current", "--file"},
+		{"herdr", "pane", "rename", "w1:p1", "--current", "--file"},
+		{"herdr", "agent", "prompt", "reviewer", "--current", "--file"},
+		{"herdr", "workspace", "create", "--label=--file", "--cwd=/srv/project"},
+		{"herdr", "tab", "create", "--label=--current", "--cwd=/srv/project"},
+		{"herdr", "agent", "explain", "--agent=--file", "--format=json"},
+		// --machine is prefix-only; the native command owns literal prompt text.
+		{"herdr", "agent", "prompt", "reviewer", "--machine", "literal-prompt"},
+	} {
+		t.Run("allow/"+strings.Join(args[1:], " "), func(t *testing.T) {
+			if err := ValidateRemoteCommand(args); err != nil {
+				t.Fatalf("rejected native arguments %q: %v", args, err)
+			}
+		})
+	}
+	if err := ValidateRemoteCommand([]string{"herdr", "--machine", "other", "agent", "list"}); err == nil {
+		t.Fatal("accepted global prefix in place of the required command group")
+	}
+}

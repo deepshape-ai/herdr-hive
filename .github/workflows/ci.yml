@@ -4,6 +4,9 @@ on:
     branches: ['**']
   pull_request:
   workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
 permissions:
   contents: read
 jobs:
@@ -63,6 +66,10 @@ jobs:
           PY
   native:
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        herdr: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["0.9.0","latest"]' || '["0.9.0","0.9.1","0.9.2","0.9.3"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -73,12 +80,45 @@ jobs:
         with:
           go-version-file: hive/go.mod
           cache-dependency-path: '**/go.sum'
-      - name: Install the pinned native integration target
+      - name: Resolve the official native integration target
         env:
-          HERDR_SHA256: 4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
+          HERDR_TARGET: ${{ matrix.herdr }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          pins = {
+              '0.9.0': '4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f',
+              '0.9.1': '2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7',
+              '0.9.2': '74de34746f96236f76d599f8f5d2439f884351eabe25b7495e0edab75414064a',
+              '0.9.3': '18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7',
+          }
+          version = os.environ['HERDR_TARGET']
+          if version == 'latest':
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/herdrdev/herdr/releases/latest',
+                  headers={'Accept': 'application/vnd.github+json',
+                           'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  release = json.load(response)
+              assert not release['draft'] and not release['prerelease'], 'Stable release required'
+              version = release['tag_name'].removeprefix('v')
+              assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), 'Invalid stable version'
+              assert tuple(map(int, version.split('.'))) >= (0, 9, 0), 'Herdr 0.9.0+ required'
+              asset = next(a for a in release['assets'] if a['name'] == 'herdr-linux-x86_64')
+              digest = asset.get('digest') or ''
+              assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest), 'Official SHA-256 required'
+              checksum = digest.removeprefix('sha256:')
+          else:
+              checksum = pins[version]
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'HERDR_VERSION={version}\nHERDR_SHA256={checksum}\n')
+          print(f'Native target: Herdr {version}, SHA-256 {checksum}')
+          PY
+      - name: Install the verified native integration target
         run: |
           mkdir -p .local/bin
-          curl --fail --location --retry 3 https://github.com/herdrdev/herdr/releases/download/v0.9.0/herdr-linux-x86_64 -o .local/bin/herdr
+          curl --fail --location --retry 3 "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" -o .local/bin/herdr
           echo "$HERDR_SHA256  .local/bin/herdr" | sha256sum --check
           chmod 755 .local/bin/herdr
           echo "$PWD/.local/bin" >> "$GITHUB_PATH"

@@ -43,27 +43,52 @@ func ValidateRemoteCommand(args []string) error {
 	case "agent explain":
 		file = true
 		valueOptions = " --agent --format "
-	case "workspace create", "tab create":
+	case "workspace create":
+		cwd = true
+		valueOptions = " --cwd --label --env "
+	case "tab create":
 		cwd = true
 		valueOptions = " --cwd --label --env --workspace "
-	case "pane current", "pane layout", "pane process-info", "pane neighbor", "pane resize", "pane zoom", "pane input", "pane split", "pane swap":
+	case "pane current", "pane layout", "pane process-info", "pane zoom":
 		current = true
-		cwd = args[2] == "split"
-		valueOptions = " --pane --direction --amount --right-click --ratio --cwd --env --source-pane --target-pane "
+		valueOptions = " --pane "
+	case "pane neighbor", "pane focus":
+		// Both use Herdr's neighbor parser: a later --current clears --pane.
+		current = true
+		valueOptions = " --pane --direction "
+	case "pane resize":
+		current = true
+		valueOptions = " --pane --direction --amount "
+	case "pane input":
+		current = true
+		valueOptions = " --pane --right-click "
+	case "pane split":
+		current = true
+		cwd = true
+		valueOptions = " --pane --direction --ratio --cwd --env --right-click "
+	case "pane swap":
+		current = true
+		valueOptions = " --pane --direction --source-pane --target-pane "
 	default:
 		return nil
 	}
 	for i := 3; i < len(args); i++ {
-		arg := args[i]
-		if (current && arg == "--current") || (file && arg == "--file") {
+		option, value, inline := strings.Cut(args[i], "=")
+		if (current && option == "--current") || (file && option == "--file") {
 			return errors.New("remote commands require explicit target IDs; --current and local --file are unavailable")
 		}
-		if cwd && arg == "--cwd" {
-			if i+1 >= len(args) || !filepath.IsAbs(args[i+1]) {
+		if cwd && option == "--cwd" {
+			if !inline {
+				if i+1 >= len(args) {
+					return errors.New("--cwd must be an absolute path on the target Bee")
+				}
+				value = args[i+1]
+			}
+			if !filepath.IsAbs(value) {
 				return errors.New("--cwd must be an absolute path on the target Bee")
 			}
 		}
-		if strings.Contains(valueOptions, " "+arg+" ") {
+		if !inline && strings.Contains(valueOptions, " "+option+" ") {
 			i++
 		}
 	}

@@ -12,6 +12,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const maxGatewaySources = gateway.MaxSources
+
 func (s *Server) aggregate(c *ssh.ServerConn, ch ssh.Channel, command string, clientDone <-chan struct{}, lifetime *time.Timer) error {
 	script := ""
 	if command == "/bin/sh -s" {
@@ -84,12 +86,14 @@ func (s *Server) aggregate(c *ssh.ServerConn, ch ssh.Channel, command string, cl
 						return nil, errors.New("sharing changed")
 					}
 					b.active[remote] = true
+					s.gatewayUpstreams.Add(1)
 					s.mu.Unlock()
 					done := make(chan struct{})
 					go func() { defer close(done); ssh.DiscardRequests(reqs) }()
 					wrapped := &gatewayStream{binding: b, Channel: remote, stop: func() { b.conn.Close() }, close: func() {
 						s.mu.Lock()
 						delete(b.active, remote)
+						s.gatewayUpstreams.Add(-1)
 						s.mu.Unlock()
 						finishChannel(remote, done, func() { b.conn.Close() }, 2*time.Second)
 					}}

@@ -1,6 +1,7 @@
 """Independent generation-1 client used by the disposable native acceptance test."""
 import json
 import os
+import re
 import selectors
 import struct
 import subprocess
@@ -17,11 +18,63 @@ def number(n):
 def text(s):
     p=s.encode();return number(len(p))+p
 
+class Surface:
+    """Decode the frozen full/patch codec independently of Hive's implementation."""
+    def __init__(self):
+        self.boot = None
+        self.projection = self.revision = 0
+        self.cols = self.rows = 0
+        self.cells = []
+
+    @staticmethod
+    def cell(d):
+        value = d.text()
+        for _ in range(3):
+            d.number()
+        d.raw(1)
+        link = d.raw(1)[0]
+        assert link in (0, 1), 'invalid cell hyperlink option'
+        if link:
+            d.number()
+        return value
+
+    def apply(self, payload):
+        d = Decoder(payload)
+        tag = d.number()
+        boot, projection = d.text(), d.number()
+        if tag == 13:
+            revision, count = d.number(), d.number()
+            assert 0 < count <= 65536, 'empty or oversized surface'
+            cells = [self.cell(d) for _ in range(count)]
+            cols, rows = d.number(), d.number()
+            assert cols > 0 and rows > 0 and cols * rows == count, 'invalid surface geometry'
+            self.boot, self.projection, self.revision = boot, projection, revision
+            self.cols, self.rows, self.cells = cols, rows, cells
+        else:
+            assert tag == 19 and self.cells, 'patch without full baseline'
+            base, revision = d.number(), d.number()
+            assert boot == self.boot and projection == self.projection, 'patch crossed source projection'
+            assert base == self.revision and revision > base, 'patch used stale surface revision'
+            for _ in range(d.number()):
+                x, y, count = d.number(), d.number(), d.number()
+                assert y < self.rows and x + count <= self.cols, 'patch outside surface'
+                start = y * self.cols + x
+                self.cells[start:start + count] = [self.cell(d) for _ in range(count)]
+            self.revision = revision
+
+    def text(self):
+        if not self.cols:
+            return ''
+        return '\n'.join(''.join(self.cells[row:row + self.cols])
+                         for row in range(0, len(self.cells), self.cols))
+
+
 
 class Wire:
     def __init__(self, args):
         self.p=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.buf=b'';self.snapshot=None;self.surface=None
+        self.screen=Surface()
         self.sel=selectors.DefaultSelector();self.sel.register(self.p.stdout,selectors.EVENT_READ)
 
     def close(self):
@@ -50,21 +103,29 @@ class Wire:
         while True:
             p=self.read(deadline);d=Decoder(p);tag=d.number();v=None
             if tag==20:
-                kind=d.text();v=json.loads(d.text())
+                kind=d.text();data=d.text()
+                if kind not in ('endpoint.welcome.v1', 'shell.snapshot.v1'):
+                    continue
+                v=json.loads(data)
                 if kind=='shell.snapshot.v1':self.snapshot=v
-            elif tag==13:
-                self.surface=(d.text(),d.number(),d.number(),p)
+            elif tag in (13, 19):
+                self.screen.apply(p)
+                self.surface=(self.screen.boot,self.screen.projection,self.screen.revision,p)
             elif tag==18:
                 boot=d.text();rid=d.text();final=d.number();v=json.loads(d.text())
                 assert final==1 and boot==self.snapshot['boot_id']
             if predicate(tag,v):return v
 
-    def hello(self, active=True):
-        self.control('endpoint.hello.v1',{'generation':1,'cell_width_px':8,'cell_height_px':16,
-            'surface_size':{'cols':100,'rows':30},'pixel_mouse':False,'direct_graphics':False,
+    def hello(self, active=True, extensions=False, size=(100, 30)):
+        hello={'generation':1,'cell_width_px':8,'cell_height_px':16,
+            'surface_size':{'cols':size[0],'rows':size[1]},'pixel_mouse':False,'direct_graphics':False,
             'endpoint_keybindings':False,'mouse_capture':True,'surface_active':active,
             'snapshot_codecs':['shell.snapshot.v1'],'surface_codecs':['shell.surface.v1'],
-            'input_codecs':['shell.input.semantic.v1'],'blob_codecs':['shell.blob.v1']})
+            'input_codecs':['shell.input.semantic.v1'],'blob_codecs':['shell.blob.v1']}
+        if extensions:
+            hello.update(surface_reuse=True, surface_delta=True, surface_scroll=True,
+                         surface_future=True)
+        self.control('endpoint.hello.v1',hello)
         self.until(lambda tag,v:tag==20 and v.get('generation')==1)
 
     def request(self,rid,method,params):
@@ -74,6 +135,11 @@ class Wire:
 
 class Decoder:
     def __init__(self,b):self.b=b;self.p=0
+    def raw(self,n):
+        value=self.b[self.p:self.p+n]
+        assert len(value)==n, 'truncated endpoint record'
+        self.p+=n
+        return value
     def number(self):
         n=self.b[self.p];self.p+=1
         if n<251:return n
@@ -119,6 +185,56 @@ def verify(sshbase, shares, api, paths, set_enabled=None):
             set_enabled('b',True)
             w.until(lambda tag,v:tag==20 and len(v.get('workspaces',[]))==3)
     finally:w.close()
+
+
+def verify_surface_updates(sshbase, api, paths, inspect):
+    """A modern viewer must keep every source visible throughout scrolling output."""
+    w=Wire([str(a) for a in sshbase]+['hive@127.0.0.1','exec /herdr remote-client-bridge'])
+    try:
+        w.hello(extensions=True,size=(170,50))
+        w.until(lambda tag,v:tag==20 and len(v.get('workspaces',[]))==len(paths))
+        workspace=next(x for x in w.snapshot['workspaces'] if x['label'].endswith('HOST_b'))
+        assert 'error' not in w.request('surface-b','workspace.focus',{'workspace_id':workspace['workspace_id']})
+        prefix='HIVE_SURFACE_ROW'
+        api(paths['b'],'pane.send_text',{'pane_id':'w1:p1',
+            'text':f'i=0; while [ "$i" -lt 80 ]; do printf "{prefix}_%03d\\n" "$i"; i=$((i+1)); sleep 0.015; done\r'})
+        seen=set()
+        frames=0
+        deadline=time.monotonic()+15
+        while f'{prefix}_079' not in w.screen.text():
+            p=w.read(deadline);d=Decoder(p);tag=d.number()
+            if tag==20:
+                kind=d.text();data=d.text()
+                if kind=='shell.snapshot.v1':
+                    w.snapshot=json.loads(data)
+                    assert len(w.snapshot['workspaces'])==len(paths), 'live source disappeared during output'
+            elif tag in (13,19):
+                w.screen.apply(p)
+                frames+=1
+                seen.update(re.findall(prefix+r'_(\d{3})',w.screen.text()))
+        assert len(seen)>=8 and frames>=2, ('sustained output was not rendered',seen,frames)
+        other=next(x for x in w.snapshot['workspaces'] if x['label'].endswith('HOST_a'))
+        other_marker='HIVE_SURFACE_OTHER'
+        api(paths['a'],'pane.send_text',{'pane_id':'w1:p1','text':f"printf '{other_marker}\\n'\r"})
+        before=w.screen.revision
+        assert 'error' not in w.request('surface-away','workspace.focus',{'workspace_id':other['workspace_id']})
+        def away():
+            return w.screen.revision>before and other_marker in w.screen.text() and f'{prefix}_079' not in w.screen.text()
+        if not away():
+            w.until(lambda tag,v:tag in (13,19) and away())
+        before=w.screen.revision
+        assert 'error' not in w.request('surface-back','workspace.focus',{'workspace_id':workspace['workspace_id']})
+        def replayed():
+            return w.screen.revision>before and f'{prefix}_079' in w.screen.text() and other_marker not in w.screen.text()
+        if not replayed():
+            w.until(lambda tag,v:tag==13 and replayed())
+        assert inspect()['gateway_upstreams']==len(paths), 'active upstream streams were not accounted for'
+        print('Modern surface negotiation, scrolling and source replay verified:',frames,'updates',flush=True)
+    finally:w.close()
+    deadline=time.monotonic()+5
+    while inspect()['gateway_upstreams']!=0:
+        assert time.monotonic()<deadline, 'closed viewer retained upstream streams'
+        time.sleep(.05)
 
 
 def verify_visibility(sshbase, expected, excluded_label=None):
@@ -210,6 +326,7 @@ class SocketWire(Wire):
         self.socket.settimeout(10)
         self.socket.connect(str(path).replace('.sock', '-client.sock'))
         self.snapshot = self.surface = None
+        self.screen = Surface()
 
     def send(self, p):
         self.socket.sendall(struct.pack('<I', len(p)) + p)

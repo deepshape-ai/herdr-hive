@@ -17,6 +17,17 @@ import (
 // MaxSources bounds per-viewer upstream connections and retained complete surfaces.
 const MaxSources = 8
 
+const (
+	initializationTimeout = 10 * time.Second
+	operationTimeout      = 30 * time.Second
+	maxRequests           = 64
+	maxInternalRequests   = 2 * MaxSources
+)
+
+type retiredRequest struct {
+	source *backend
+}
+
 // Source.Open must honor cancellation, including while establishing a stream.
 type Source struct {
 	ID, Name, Label string
@@ -36,6 +47,7 @@ type backend struct {
 	frame         completeSurface
 	chunks        map[string][]byte
 	cancel        context.CancelFunc
+	initializeBy  time.Time
 }
 type event struct {
 	stream io.ReadWriteCloser
@@ -66,6 +78,13 @@ type session struct {
 	fenceUntil       time.Time
 	deadlines        map[string]time.Time
 	cols, rows       uint64
+	requestSequence  uint64
+	requestIDs       map[string]string
+	retired          map[string]retiredRequest
+	renderedSource   *backend
+	renderedRevision uint64
+	renderedSurface  uint64
+	renderedProject  uint64
 }
 
 // Serve presents the visible Bee sessions as one stable Herdr endpoint. All
@@ -77,7 +96,7 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 	if _, e := rand.Read(nonce); e != nil {
 		return e
 	}
-	g := &session{ctx: ctx, cancel: cancel, out: out, catalog: catalog, events: make(chan event, 2), sources: map[string]*backend{}, pending: map[string]*backend{}, deadlines: map[string]time.Time{}, boot: "hive-" + hex.EncodeToString(nonce)}
+	g := &session{ctx: ctx, cancel: cancel, out: out, catalog: catalog, events: make(chan event, 2), sources: map[string]*backend{}, pending: map[string]*backend{}, deadlines: map[string]time.Time{}, requestIDs: map[string]string{}, retired: map[string]retiredRequest{}, boot: "hive-" + hex.EncodeToString(nonce)}
 	defer func() {
 		cancel()
 		for _, b := range g.sources {
@@ -101,40 +120,19 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 		if d.num() != 20 || d.text() != "endpoint.hello.v1" {
 			return errWire
 		}
-		var h map[string]any
-		if json.Unmarshal([]byte(d.text()), &h) != nil || d.err != nil || d.p != len(d.b) || h["generation"] != float64(1) {
+		data := d.text()
+		if d.err != nil || d.p != len(d.b) {
 			return errWire
 		}
-		for field, codec := range map[string]string{"snapshot_codecs": "shell.snapshot.v1", "surface_codecs": "shell.surface.v1", "input_codecs": "shell.input.semantic.v1", "blob_codecs": "shell.blob.v1"} {
-			ok := false
-			for _, v := range array(h[field]) {
-				ok = ok || v == codec
+		if e := g.negotiateHello(data); e != nil {
+			welcome := welcomeValue()
+			welcome["methods"], welcome["capabilities"] = []string{}, []string{}
+			welcome["error"] = map[string]string{"code": "incompatible_endpoint", "message": e.Error()}
+			if writeErr := g.jsonControl("endpoint.welcome.v1", welcome); writeErr != nil {
+				return writeErr
 			}
-			if !ok {
-				return errWire
-			}
+			return e
 		}
-		g.surfaceActive = h["surface_active"] != false
-		size := object(h["surface_size"])
-		g.cols = uint64(numberVal(size["cols"]))
-		g.rows = uint64(numberVal(size["rows"]))
-		if g.cols*g.rows > 65536 {
-			return errWire
-		}
-		h["direct_graphics"] = false
-		// Background subscriptions must not acquire publisher layout authority.
-		h["surface_active"] = false
-		g.resize = append(number(12), number(uint64(numberVal(h["cell_width_px"])))...)
-		g.resize = append(g.resize, number(uint64(numberVal(h["cell_height_px"])))...)
-		g.resize = append(g.resize, number(g.cols)...)
-		g.resize = append(g.resize, number(g.rows)...)
-		pixelMouse := byte(0)
-		if h["pixel_mouse"] == true {
-			pixelMouse = 1
-		}
-		g.resize = append(g.resize, pixelMouse)
-		p, _ := json.Marshal(h)
-		g.hello = control("endpoint.hello.v1", p)
 	case <-timer.C:
 		return errors.New("endpoint handshake timed out")
 	case <-ctx.Done():
@@ -142,8 +140,7 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 	}
 	// The gateway advertises only operations it can route; upstream support is
 	// checked again for each call; presentation fences follow the active source.
-	welcome := map[string]any{"generation": 1, "server_version": "0.9.0", "snapshot_codec": "shell.snapshot.v1", "surface_codec": "shell.surface.v1", "input_codec": "shell.input.semantic.v1", "blob_codec": "shell.blob.v1", "methods": supportedMethods, "capabilities": []string{"surface_interest", "presentation_effects_fence", "health_check"}}
-	if e := g.jsonControl("endpoint.welcome.v1", welcome); e != nil {
+	if e := g.jsonControl("endpoint.welcome.v1", welcomeValue()); e != nil {
 		return e
 	}
 	if e := g.publish(); e != nil {
@@ -184,6 +181,7 @@ func Serve(ctx context.Context, out io.ReadWriteCloser, catalog Catalog) error {
 			}
 			if ev.stream != nil {
 				b.stream = ev.stream
+				b.initializeBy = time.Now().Add(initializationTimeout)
 				continue
 			}
 			if ev.data == nil {
@@ -217,11 +215,18 @@ func (g *session) remove(b *backend) {
 	}
 	for id, target := range g.pending {
 		if target == b {
+			consumerID := g.requestIDs[id]
 			delete(g.pending, id)
 			delete(g.deadlines, id)
-			if !internalInterest(id) && g.failure(id, "sharing disconnected") != nil {
+			delete(g.requestIDs, id)
+			if consumerID != "" && g.failure(consumerID, "sharing disconnected") != nil {
 				g.cancel()
 			}
+		}
+	}
+	for id, retired := range g.retired {
+		if retired.source == b {
+			delete(g.retired, id)
 		}
 	}
 	b.cancel()
@@ -234,6 +239,15 @@ func (g *session) remove(b *backend) {
 	}
 }
 func (g *session) refresh() {
+	now := time.Now()
+	for _, b := range g.sources {
+		if !b.initializeBy.IsZero() && !now.Before(b.initializeBy) {
+			g.remove(b)
+			if g.publish() != nil {
+				g.cancel()
+			}
+		}
+	}
 	if g.fenceSource != nil && time.Now().After(g.fenceUntil) {
 		g.remove(g.fenceSource)
 		if g.publish() != nil {
@@ -241,19 +255,22 @@ func (g *session) refresh() {
 		}
 	}
 	for id, t := range g.deadlines {
-		if time.Now().After(t) {
+		if !now.Before(t) {
 			b := g.pending[id]
+			consumerID, ordinary := g.requestIDs[id]
 			delete(g.pending, id)
 			delete(g.deadlines, id)
+			delete(g.requestIDs, id)
 			delete(b.chunks, id)
-			if internalInterest(id) {
+			if !ordinary {
 				g.remove(b)
 				if g.publish() != nil {
 					g.cancel()
 				}
 				continue
 			}
-			if g.failure(id, "sharing operation timed out") != nil {
+			g.retired[id] = retiredRequest{source: b}
+			if g.failure(consumerID, "sharing operation timed out") != nil {
 				g.cancel()
 			}
 		}
@@ -276,11 +293,17 @@ func (g *session) refresh() {
 			continue
 		}
 		ctx, cancel := context.WithCancel(g.ctx)
-		b := &backend{source: src, cancel: cancel, chunks: map[string][]byte{}, methods: map[string]bool{}, effects: map[uint64][]byte{}}
+		b := &backend{source: src, cancel: cancel, chunks: map[string][]byte{}, methods: map[string]bool{}, effects: map[uint64][]byte{}, initializeBy: now.Add(initializationTimeout)}
 		g.sources[src.ID] = b
 		go func() {
 			stream, e := src.Open(ctx)
 			if e == nil {
+				// Cancellation must also release an Open stream blocked writing
+				// hello, before it has reached the event loop's ownership.
+				go func() {
+					<-ctx.Done()
+					stream.Close()
+				}()
 				e = Write(stream, g.hello)
 				if e == nil {
 					select {
@@ -463,9 +486,46 @@ func (g *session) sendSurface() error {
 	d.text()
 	d.num()
 	g.surfaceRevision++
+	upstreamSurface := d.replaceNum(g.surfaceRevision)
+	p = append(d.out, p[d.p:]...)
+	if e := Write(g.out, p); e != nil {
+		return e
+	}
+	g.renderedSource, g.renderedRevision = b, g.revision
+	g.renderedProject, g.renderedSurface = rev, upstreamSurface
+	return nil
+}
+
+// Emit the frozen ordinary patch only when the viewer has its exact baseline.
+// The complete cache has already advanced, and remains the source-switch path.
+func (g *session) sendPatch(b *backend, raw []byte) error {
+	if !g.surfaceActive {
+		return nil
+	}
+	d := decoder{b: raw}
+	d.num()
+	d.text()
+	projection, base, revision := d.num(), d.num(), d.num()
+	if g.renderedSource != b || g.renderedRevision != g.revision || g.renderedProject != projection || g.renderedSurface != base {
+		return g.sendSurface()
+	}
+	p, e := surface(raw, g.boot, g.revision, func(id string) string { return b.prefix + id })
+	if e != nil {
+		return e
+	}
+	d = decoder{b: p}
+	d.num()
+	d.text()
+	d.num()
+	d.replaceNum(g.surfaceRevision)
+	g.surfaceRevision++
 	d.replaceNum(g.surfaceRevision)
 	p = append(d.out, p[d.p:]...)
-	return Write(g.out, p)
+	if e := Write(g.out, p); e != nil {
+		return e
+	}
+	g.renderedSurface = revision
+	return nil
 }
 func numberVal(v any) float64 { n, _ := v.(float64); return n }
 func (g *session) server(b *backend, p []byte) error {
@@ -486,11 +546,19 @@ func (g *session) server(b *backend, p []byte) error {
 			}
 			return nil
 		}
+		// Named sidebands have their own codecs. Unknown optional controls are
+		// opaque; only the frozen welcome and snapshot kinds require JSON.
+		if kind != "endpoint.welcome.v1" && kind != "shell.snapshot.v1" {
+			if strings.HasPrefix(kind, "endpoint.surface-") || strings.HasPrefix(kind, "shell.surface.") || strings.HasPrefix(kind, "shell.snapshot.") {
+				return errors.New("publisher sent an unnegotiated rendering codec: " + kind)
+			}
+			return nil
+		}
 		var v map[string]any
 		if len(data) > 256<<10 {
 			return errWire
 		}
-		if json.Unmarshal([]byte(data), &v) != nil {
+		if json.Unmarshal([]byte(data), &v) != nil || v == nil {
 			return errWire
 		}
 		switch kind {
@@ -498,8 +566,8 @@ func (g *session) server(b *backend, p []byte) error {
 			if b.welcomed {
 				return errWire
 			}
-			if v["error"] != nil || v["generation"] != float64(1) {
-				return errWire
+			if e := validateWelcome(v); e != nil {
+				return e
 			}
 			b.welcomed = true
 			for _, m := range array(v["methods"]) {
@@ -525,16 +593,26 @@ func (g *session) server(b *backend, p []byte) error {
 			hash := sha256.Sum256([]byte(b.source.ID + "\x00" + boot))
 			b.prefix = "g" + hex.EncodeToString(hash[:8]) + "/"
 			b.snapshot = v
+			b.initializeBy = time.Time{}
 			return g.publish()
 		}
 		return nil
 	case 13, 19:
+		if !b.welcomed || b.snapshot == nil {
+			return errors.New("publisher sent a surface before initialization")
+		}
+		if d.text() != b.boot || d.err != nil {
+			return errors.New("publisher surface has a stale boot identity")
+		}
 		// Validate the complete fixed codec before retaining anything.
 		if _, e := surface(p, g.boot, g.revision, func(id string) string { return id }); e != nil {
 			return e
 		}
 		if e := b.frame.update(p); e != nil {
 			return e
+		}
+		if tag == 19 && b == g.active {
+			return g.sendPatch(b, p)
 		}
 		if b == g.active {
 			return g.sendSurface()
@@ -545,19 +623,30 @@ func (g *session) server(b *backend, p []byte) error {
 		return nil
 	case 18:
 		boot, id := d.text(), d.text()
-		if g.pending[id] != b {
-			return errWire
-		}
 		final := d.raw(1)
 		data := d.text()
-		if d.err != nil || d.p != len(p) || boot != b.boot {
+		if d.err != nil || d.p != len(p) || boot != b.boot || len(final) != 1 || final[0] > 1 {
+			return errWire
+		}
+		if retired, ok := g.retired[id]; ok {
+			if retired.source != b {
+				return errWire
+			}
+			// The operation was not retried. Drain its late chunks without
+			// retaining data or exposing them to a reused consumer request ID.
+			if final[0] == 1 {
+				delete(g.retired, id)
+			}
+			return nil
+		}
+		if g.pending[id] != b {
 			return errWire
 		}
 		total := len(data)
 		for _, v := range b.chunks {
 			total += len(v)
 		}
-		if total > MaxFrame || len(b.chunks) >= 64 {
+		if total > MaxFrame || (b.chunks[id] == nil && len(b.chunks) >= maxRequests+maxInternalRequests) {
 			return errWire
 		}
 		b.chunks[id] = append(b.chunks[id], data...)
@@ -566,25 +655,30 @@ func (g *session) server(b *backend, p []byte) error {
 		}
 		data = string(b.chunks[id])
 		delete(b.chunks, id)
+		consumerID, ordinary := g.requestIDs[id]
 		delete(g.pending, id)
 		delete(g.deadlines, id)
+		delete(g.requestIDs, id)
 		var v any
 		if json.Unmarshal([]byte(data), &v) != nil {
 			return errWire
 		}
-		if internalInterest(id) {
+		if !ordinary {
 			if object(v) == nil || object(v)["error"] != nil {
 				return errors.New("publisher rejected surface interest")
 			}
-			return nil
+			if e := g.syncInterest(); e != nil {
+				return e
+			}
+			return g.resumeFence()
 		}
 		v = transform(v, func(id string) string { return b.prefix + id })
 		if obj := object(v); obj != nil {
-			obj["id"] = id
+			obj["id"] = consumerID
 		} else {
 			return errWire
 		}
-		return g.response(id, v)
+		return g.response(consumerID, v)
 	case 3:
 		return io.EOF
 	case 4, 14:
@@ -699,8 +793,13 @@ func (g *session) client(p []byte) error {
 			return errWire
 		}
 		id, method := stringVal(v["id"]), stringVal(v["method"])
-		if id == "" || len(id) > 128 || internalInterest(id) {
+		if id == "" || len(id) > 128 {
 			return errWire
+		}
+		for _, pendingID := range g.requestIDs {
+			if pendingID == id {
+				return errWire
+			}
 		}
 		if boot != g.boot {
 			return g.failure(id, "stale Hive endpoint")
@@ -744,6 +843,9 @@ func (g *session) client(p []byte) error {
 		if target == nil || !target.methods[method] {
 			return g.failure(id, "operation unavailable on this sharing")
 		}
+		if len(g.requestIDs)+len(g.retired) >= maxRequests {
+			return g.failure(id, "too many outstanding or expired operations")
+		}
 		if strings.HasSuffix(method, ".focus") && target != g.active {
 			g.active = target
 			if e := g.replayEffects(); e != nil {
@@ -753,26 +855,27 @@ func (g *session) client(p []byte) error {
 				return e
 			}
 		}
-		if len(g.pending) >= 64 {
-			return g.failure(id, "too many outstanding operations")
+		if g.requestSequence == ^uint64(0) {
+			return g.failure(id, "request identity space exhausted")
 		}
-		if g.pending[id] != nil {
-			return errWire
-		}
-		g.pending[id] = target
-		g.deadlines[id] = time.Now().Add(30 * time.Second)
+		g.requestSequence++
+		wireID := fmt.Sprintf("%s%d", requestPrefix, g.requestSequence)
+		v["id"] = wireID
+		g.pending[wireID] = target
+		g.requestIDs[wireID] = id
+		g.deadlines[wireID] = time.Now().Add(operationTimeout)
 		q, _ := json.Marshal(v)
 		out := append([]byte{15}, str(target.boot)...)
 		out = append(out, str(string(q))...)
 		return g.send(target, out)
 	case 12:
-		d.nums(2)
+		width, height := d.num(), d.num()
 		cols, rows := d.num(), d.num()
 		pixelMouse := d.raw(1)
 		if len(pixelMouse) != 1 || pixelMouse[0] > 1 {
 			return errWire
 		}
-		if cols == 0 || rows == 0 || cols > 65536 || rows > 65536 || cols*rows > 65536 || d.err != nil || d.p != len(p) {
+		if width > uint64(^uint32(0)) || height > uint64(^uint32(0)) || cols == 0 || rows == 0 || cols > 65535 || rows > 65535 || cols*rows > 65536 || d.err != nil || d.p != len(p) {
 			return errWire
 		}
 		g.cols, g.rows = cols, rows
@@ -817,6 +920,7 @@ func allowedMethod(m string) bool {
 }
 
 func (g *session) blankSurface() error {
+	g.renderedSource = nil
 	g.surfaceRevision++
 	b := append([]byte{13}, str(g.boot)...)
 	b = append(b, number(g.revision)...)
@@ -857,6 +961,9 @@ func (g *session) resumeFence() error {
 		g.fence = ""
 		g.fencePending = false
 		return Write(g.out, control("endpoint.presentation.ready.v1", []byte(token)))
+	}
+	if g.surfaceActive && !g.active.surfaceActive {
+		return nil
 	}
 	g.fenceSource = g.active
 	g.fenceUntil = time.Now().Add(10 * time.Second)

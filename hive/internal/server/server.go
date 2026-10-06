@@ -63,6 +63,7 @@ type Server struct {
 	enrollMu                                          sync.Mutex
 	enrollSlots                                       chan struct{}
 	gatewaySlots                                      chan struct{}
+	gatewayUpstreams                                  atomic.Int64
 	enrolled, enrollRejected                          atomic.Uint64
 	mu                                                sync.Mutex
 	shares                                            map[string]*binding

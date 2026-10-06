@@ -155,7 +155,7 @@ func TestGraphicsSurviveIncrementalAssetElision(t *testing.T) {
 	}
 }
 func testSession() *session {
-	return &session{out: &memoryStream{}, sources: map[string]*backend{}, pending: map[string]*backend{}, deadlines: map[string]time.Time{}, catalog: func() []Source { return nil }, boot: "hive", cancel: func() {}}
+	return &session{out: &memoryStream{}, sources: map[string]*backend{}, pending: map[string]*backend{}, deadlines: map[string]time.Time{}, requestIDs: map[string]string{}, retired: map[string]retiredRequest{}, catalog: func() []Source { return nil }, boot: "hive", cancel: func() {}}
 }
 func responseFrame(boot, id string) []byte {
 	b := append([]byte{18}, str(boot)...)
@@ -231,6 +231,7 @@ func TestResponsesAreBoundToTheirSource(t *testing.T) {
 	a := &backend{boot: "a", chunks: map[string][]byte{}}
 	b := &backend{boot: "b", chunks: map[string][]byte{}}
 	g.pending["r"] = a
+	g.requestIDs["r"] = "r"
 	if e := g.server(b, responseFrame("b", "r")); e == nil {
 		t.Fatal("cross-source response accepted")
 	}
@@ -244,7 +245,9 @@ func TestResponsesAreBoundToTheirSource(t *testing.T) {
 func TestWelcomeIsSingleAndMethodsBounded(t *testing.T) {
 	g := testSession()
 	b := &backend{methods: map[string]bool{}}
-	v, _ := json.Marshal(map[string]any{"generation": 1, "methods": []string{"pane.focus", "untrusted.dynamic"}})
+	welcome := welcomeValue()
+	welcome["methods"] = []string{"pane.focus", "untrusted.dynamic"}
+	v, _ := json.Marshal(welcome)
 	p := control("endpoint.welcome.v1", v)
 	if e := g.server(b, p); e != nil {
 		t.Fatal(e)

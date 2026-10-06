@@ -206,6 +206,13 @@ for line in sys.stdin:
             remote('a', 'B/default', 'pane', 'zoom', '--pane', moved['pane_id'], '--off')
             split = json.loads(remote('a', 'B/default', 'pane', 'split', moved['pane_id'], '--direction', 'down', '--no-focus').stdout)['result']['pane']
             remote('a', 'B/default', 'pane', 'resize', '--pane', split['pane_id'], '--direction', 'up', '--amount', '0.1')
+            remote('a', 'B/default', 'pane', 'focus', '--pane', moved['pane_id'], '--direction', 'down')
+            before_focus = api(sock, 'session.snapshot')['snapshot']['focused_pane_id']
+            assert before_focus == split['pane_id'], 'explicit remote pane selection failed'
+            rejected_focus = remote('a', 'B/default', 'pane', 'focus', '--direction', 'up', '--current', check=False)
+            assert rejected_focus.returncode != 0 and 'require explicit target IDs' in rejected_focus.stderr, rejected_focus
+            assert api(sock, 'session.snapshot')['snapshot']['focused_pane_id'] == before_focus, 'rejected current selector moved owner focus'
+            result['remote_focus_explicit_ids_and_current_selector_rejection'] = True
             remote('a', 'B/default', 'pane', 'close', split['pane_id'])
             result['native_tab_and_pane_management'] = True
 

@@ -180,8 +180,11 @@ Host hive
 herdr machine add hive --label Hive
 ```
 
-Unmodified compatible Herdr 0.9.0 and newer automatically show other devices'
-online shared sessions under this one machine. Workspace labels are `[Bee name/session] workspace`,
+Unmodified Herdr 0.9.0 and later clients/owners that retain endpoint generation 1
+and its frozen required codecs show other devices' online shared sessions under
+this one machine. Optional newer render encodings are not negotiated by Hive;
+unknown breaking generations/codecs are rejected, not promised compatibility.
+Workspace labels are `[Bee name/session] workspace`,
 for example `[Alice/research] xxx`; the default session appears as `[Alice] xxx`.
 Hive refreshes membership every second; new publications appear and offline publications disappear. Names and IDs are
 projected by Hive; the owner's actual workspace names are unchanged. Sharing and
@@ -215,13 +218,16 @@ rejection is explicit. Long-running `bee on` agent waits hold a slot until their
 timeout, completion or cancellation. Use finite wait timeouts and allow room
 for directory and control commands when sizing concurrent automation.
 
-The SSH library bounds channel windows to 2 MiB per direction. Two relay legs
-therefore contribute at most approximately 4 MiB of receive-window capacity per
-active forwarded channel in Hive, plus small copy buffers, SSH transport queues,
-crypto and Go runtime overhead. This is a capacity envelope, not a resident-memory
-promise. Sixteen channels give roughly 64 MiB of application receive-window
-capacity. Slow readers exert backpressure; Hive never accumulates a full session
-transcript. Herdr remains responsible for its own terminal history and output policy.
+The SSH library bounds receive windows to 2 MiB on each channel leg in Hive.
+A direct relay's consumer and publisher legs therefore contribute approximately
+4 MiB of receive-window capacity per forwarded channel. Sixteen direct channels
+give roughly 64 MiB of application receive-window capacity, **not a whole-service
+memory budget**. Aggregate viewers open additional, independent upstream legs;
+see [aggregate gateway limits](#aggregate-gateway-limits). Copy buffers, retained
+gateway scenes/responses, SSH transport queues, crypto and Go runtime overhead are
+additional. These are capacity envelopes, not resident-memory promises. Slow
+readers exert backpressure; Hive never accumulates a full session transcript.
+Herdr remains responsible for its own terminal history and output policy.
 
 Control payloads, each key file, token file and enrollment usage file are limited
 to 64 KiB, with at most 1,024 tokens or keys per store. Invalid files fail closed;
@@ -270,8 +276,18 @@ Hive if existing transports for that key must be terminated immediately.
 The aggregate endpoint accepts eight concurrent viewers, each opening at most eight
 visible sessions in stable share-ID order. If more sessions are published, a
 configuration notice explains the limit; the direct sharing-ID path remains
-available. These limits are independent of the existing SSH/channel budgets.
-`hive inspect --json` includes `gateway_viewers` and `max_gateway_viewers`.
+available. Viewer and per-viewer source limits are separate from the global
+consumer-channel budget: each aggregate viewer consumes one consumer channel
+**and independently opens up to eight publisher legs**. Eight viewers can thus
+open 64 aggregate upstream legs, even when they view the same eight sessions;
+the legs and retained scenes are not shared between viewers. At 2 MiB per leg,
+these upstream windows alone have up to 128 MiB of receive-window capacity, plus
+16 MiB for the eight viewer windows. Remaining consumer channels, direct/API
+publisher legs, retained scenes and runtime/transport overhead add to that sum.
+The default 16 consumer-channel slots can contribute up to another 32 MiB of
+consumer receive windows in total (including those viewers), not cap all upstream
+legs. `hive inspect --json` includes `gateway_viewers`, `max_gateway_viewers`,
+`gateway_upstreams` and `max_gateway_upstreams` to expose this separate envelope.
 Each Herdr window consumes a viewer slot; `herdr machine add` also needs a slot
 temporarily to verify the native connection. This is a service-wide connection
 limit, not a limit on registered Bees or people. Multiple windows from one device
@@ -287,8 +303,26 @@ Older Bee publishers still follow Herdr's native shared sizing rules.
 
 Each upstream snapshot is at most 256 KiB. Native frames, retained complete
 surfaces (including live image assets), and incomplete response data per source
-are each capped at 2 MiB; surfaces contain at most 65,536 cells. There are at most
-64 pending operations per viewer, expiring after 30 seconds. Frame queues are
-bounded, and SSH application writes have a 10-second hard limit. A failed source
-is removed and retried without replaying input. Only the current complete screen
-is retained in memory; no transcript or terminal data is written to disk.
+are each capped at 2 MiB; surfaces contain at most 65,536 cells. The active source's
+ordinary frozen patches are forwarded incrementally only against the exact
+displayed baseline. Source switches and baseline changes use a complete scene;
+hidden patches and live graphics assets remain in the bounded complete cache.
+
+Each viewer has 64 ordinary-operation slots and 16 separately bounded internal
+surface-transition slots. Ordinary calls return a timeout after 30 seconds, without
+retrying the operation or disconnecting its healthy source. An expired call retains
+only its unique upstream identity until the final response or source disconnection;
+late chunks are discarded, not buffered or delivered to a reused consumer ID.
+Pending plus expired calls share the 64-slot bound. Saturation explicitly rejects
+new calls rather than growing tombstones, dropping their identities, or revoking
+healthy sources. Internal interest acknowledgements still have a 30-second limit.
+When internal slots fill, only the latest unsent desired state is retained;
+acknowledgements resume release-before-activation, followed by presentation fences.
+
+Source opening/hello writing has a 10-second initialization limit. After hello,
+welcome and the first snapshot must arrive within a further 10 seconds; the
+one-second membership tick enforces these limits. A silent or failed source is
+removed and retried independently without replaying input or requests. Frame
+queues are bounded, and SSH application writes and presentation fences have
+10-second hard limits. Only the latest complete screen per upstream leg is
+retained in memory; no transcript or terminal data is written to disk.

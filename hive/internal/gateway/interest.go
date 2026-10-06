@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
-// Reserve a wire request namespace so upstream interest acknowledgements can
-// never be mistaken for a downstream operation. Requests share the existing
-// bounded pending table, response validation and timeout machinery.
+// Reserve wire namespaces so upstream acknowledgements and late ordinary
+// responses can never be mistaken for a reused downstream operation ID.
+// Internal transitions and ordinary operations have separate bounded budgets.
 const interestPrefix = "hive:surface:"
-
-func internalInterest(id string) bool { return strings.HasPrefix(id, interestPrefix) }
+const requestPrefix = "hive:request:"
 
 func (g *session) syncInterest() error {
 	// Relinquish the previous source before activating its replacement.
@@ -21,6 +19,10 @@ func (g *session) syncInterest() error {
 		if b.surfaceActive && (b != g.active || !g.surfaceActive) {
 			if err := g.setInterest(b, false); err != nil {
 				return err
+			}
+			if b.surfaceActive {
+				// No slot yet: do not acquire a second source's layout authority.
+				return nil
 			}
 		}
 	}
@@ -34,8 +36,10 @@ func (g *session) setInterest(b *backend, active bool) error {
 	if !b.methods["client_shell.surface.set"] {
 		return errors.New("publisher does not support surface interest")
 	}
-	if len(g.pending) >= 64 {
-		return errors.New("too many outstanding surface operations")
+	if len(g.pending)-len(g.requestIDs) >= maxInternalRequests {
+		// Retain only the latest desired state in g.active/g.surfaceActive.
+		// An acknowledgement frees a slot and resumes this unsent transition.
+		return nil
 	}
 	// Set the viewer's latest dimensions while this subscription is still
 	// inactive; activation then uses the correct size, including after reconnect.
@@ -52,7 +56,7 @@ func (g *session) setInterest(b *backend, active bool) error {
 	v, _ := json.Marshal(map[string]any{"id": id, "method": "client_shell.surface.set", "params": map[string]any{"active": active}})
 	p := append(append([]byte{15}, str(b.boot)...), str(string(v))...)
 	g.pending[id] = b
-	g.deadlines[id] = time.Now().Add(30 * time.Second)
+	g.deadlines[id] = time.Now().Add(operationTimeout)
 	b.surfaceActive = active
 	return g.send(b, p)
 }

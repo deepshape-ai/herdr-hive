@@ -100,7 +100,12 @@ since 0.9.1, and validates discovery scripts by constrained grammar and semantic
 version instead of whole-script hashes. Unknown scripts are rejected; accepted
 scripts are inspected as data and never executed. Bee stages shell activation and
 uses private surface barriers while forwarding native terminal input and output.
-The aggregate codec and limits are specified in protocol/v1.md and
+The aggregate endpoint constructs its own generation-1 offer from the four
+implemented frozen codecs, never copying optional rendering offers from a viewer.
+Compatible future owners can select these codecs as a fallback; an incompatible
+generation or selected codec fails explicitly. Unknown non-rendering sidebands
+are opaque, while unsupported rendering controls cannot advance the retained
+baseline. The aggregate codec and limits are specified in protocol/v1.md and
 hive/README.md; unsupported aggregate operations remain available by direct sharing ID.
 
 | Operation | Implementation / guarantee |
@@ -187,7 +192,13 @@ connections briefly disconnect. This avoids a second relay generation, connectio
 handoff protocol or supervisor service. No Herdr core changes are required.
 
 The `hive/internal/gateway` module owns each viewer's projection and routing event
-loop. Server adapters own SSH channels and hard write deadlines. Source loss
-removes its metadata and pending operations; other sources continue. Response IDs
-are bound to their originating source. Live image assets and terminal input modes
-are retained for coherent switching, within the documented resource limits.
+loop. Server adapters own SSH channels and hard write deadlines. Source opening
+and hello writing have a ten-second deadline, followed by ten seconds for welcome
+and the first snapshot. Source loss removes its metadata and pending operations;
+other sources continue. Unique upstream request IDs are bound to their source
+and mapped back to consumer IDs. Timed-out ordinary operations retain bounded
+identities until their final response or source removal, so late chunks cannot
+disconnect a healthy source or reach a reused consumer ID. No operation is replayed.
+Active plain patches remain incremental only with an exact displayed baseline;
+complete scenes and live graphics are retained for coherent switching. Viewer
+streams and their additional upstream legs are accounted separately in inspect.

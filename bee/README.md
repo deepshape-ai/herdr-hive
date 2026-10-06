@@ -219,12 +219,19 @@ target Bee checks its bound session socket and the method allowlist. The native
 CLI keeps its protocol checks, startup polling, wait semantics, output formatting,
 stdin, stderr, and exit status. Text reads remain text, not Bee JSON envelopes.
 
-The wrapper clears inherited `HERDR_*` context and rejects session overrides,
-the `--current` option, and relative `--cwd` option values. Literal prompt or
-shell text is preserved. Use explicit target pane/workspace IDs.
+The wrapper clears inherited `HERDR_*` context and rejects `--session`/`--remote`
+overrides, native `--current` selectors (including directional `pane focus`), and
+relative `--cwd` option values. Literal prompt, shell and label text such as
+`--current` or `--file` is preserved. Use explicit target pane/workspace IDs.
 Interactive `agent attach`, binary terminal transport, local-file explanation,
 worktree commands, plugin administration, and server stop/update are outside this
 API route. Native UI sharing remains available for interactive viewing.
+
+Herdr 0.9.0 is the minimum supported native version. Compatibility with 0.9.0+
+depends on the fixed API method allowlist and the supported CLI subset above,
+not an unconditional promise for future breaking versions. A newer native CLI
+method outside that allowlist is explicitly rejected; upgrading Herdr does not
+silently expand remote permissions or switch this route to local execution.
 
 Sharing still grants registered members full control of the selected session.
 Closing a remote pane affects the real process on its owner. Disabling sharing
@@ -287,9 +294,12 @@ rules can extend the rule discriminator without changing manual rule semantics.
 
 An enabled rule refers to the selected named session, including its future panes
 and agents. It is not tied to a particular agent process. A running connection
-checks socket identity before opening streams. Herdr session restart/replacement
-requires a publication refresh (`bee enable`) if the old socket binding remains
-online. No automatic agent restart, prompt replay or resume is performed.
+checks socket identity before opening streams. Since Bee 0.4.1, the publisher
+also checks both session endpoints every second and automatically withdraws and
+rebinds a publication after Herdr restart/replacement, even while the old sockets
+remain online. Sharing resumes when fresh bindings are ready; `bee enable` is
+not required again. Existing connections close; no automatic agent restart,
+prompt replay or resume is performed.
 
 Bee needs both Herdr socket files and local `herdr status` access. An unavailable
 selected session currently keeps publication pending until it is available or

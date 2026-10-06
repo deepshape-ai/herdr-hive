@@ -101,8 +101,8 @@ func TestInterestFollowsVisibilityAndConsumesAcknowledgements(t *testing.T) {
 	if a.surfaceActive || b.surfaceActive {
 		t.Fatal("hidden source retained interest")
 	}
-	if err := g.client(clientRequest(g, interestPrefix+"1", "client_shell.surface.set", map[string]any{"active": true})); err == nil {
-		t.Fatal("client forged internal request ID")
+	if err := g.client(clientRequest(g, interestPrefix+"1", "client_shell.surface.set", map[string]any{"active": true})); err != nil {
+		t.Fatal("consumer request namespace was mistaken for an internal acknowledgement", err)
 	}
 }
 

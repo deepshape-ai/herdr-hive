@@ -1,7 +1,7 @@
 """Disposable native Herdr acceptance test. Never uses existing sessions or SSH keys.
 
-Build dist/hive and dist/bee first. Requires Herdr 0.9.0 and pexpect.
-Temporary state stays under ignored .r and is removed on success or failure.
+Build dist/hive and dist/bee first. Requires Herdr 0.9.0+ and pexpect.
+Each run owns a short private temporary directory and removes it on exit.
 """
 import json
 import os
@@ -10,16 +10,47 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import pexpect
+import pyte
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
-R = ROOT / '.r'
+TEMP = tempfile.TemporaryDirectory(prefix='hn-', dir='/tmp')
+R = Path(TEMP.name) / 'r'
 BIN = shutil.which('herdr')
 BASE = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR_', 'BEE_'))}
 processes, logs, terminals, sockets = [], [], [], []
 result = {}
+
+
+class Screen(pyte.Screen):
+    def report_device_status(self, *args, **kwargs):
+        pass
+
+
+class TerminalScreen:
+    def __init__(self, terminal):
+        rows, cols = terminal.getwinsize()
+        self.screen = Screen(cols, rows)
+        self.stream = pyte.Stream(self.screen)
+        terminal.logfile_read = self
+
+    def write(self, text):
+        self.stream.feed(text)
+
+    def flush(self):
+        pass
+
+    def expect_visible(self, terminal, marker, timeout=20):
+        deadline = time.monotonic() + timeout
+        while marker not in '\n'.join(self.screen.display):
+            assert time.monotonic() < deadline, ('rendered terminal marker timeout', marker, self.screen.display)
+            try:
+                terminal.read_nonblocking(65536, timeout=.2)
+            except pexpect.TIMEOUT:
+                pass
 
 
 def run(args, env=None, check=True, timeout=30):
@@ -174,7 +205,7 @@ def main():
     wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];out=[]\nwhile a:\n x=a.pop(0)\n if x in ("-F","-S"): a.pop(0)\n else: out.append(x)\nos.execv("/usr/bin/ssh",["ssh","-F",'+repr(str(sshconfig))+']+out)\n');wrapper.chmod(0o700)
     consumer_env=dict(BASE,XDG_CONFIG_HOME=str(R/'consumer'),XDG_STATE_HOME=str(R/'consumer/state'),PATH=str(bindir)+os.pathsep+BASE['PATH'],TERM='xterm-256color')
     conf=R/'consumer/herdr';conf.mkdir();(conf/'config.toml').write_text('onboarding = false\n[update]\nversion_check = false\nmanifest_check = false\n')
-    from gateway import verify, verify_visibility, verify_dimensions, verify_shared_sizing
+    from gateway import verify, verify_visibility, verify_dimensions, verify_shared_sizing, verify_surface_updates
     verify_dimensions(sshbase, shares, api, {who:R/who/'herdr/herdr.sock' for who in 'abc'}, R)
     result['gateway_background_and_active_pty_size_isolation']=True
     verify_shared_sizing(sshbase, shares, api, {who:R/who/'herdr/herdr.sock' for who in 'abc'}, R)
@@ -184,11 +215,15 @@ def main():
     own=list(sshbase);own[own.index('-i')+1]=str(R/'a/key')
     verify_visibility(own,2,'HOST_a')
     result['gateway_prefix_ids_focus_input_self_hiding_and_reconnect']=True
+    verify_surface_updates(sshbase,api,{who:R/who/'herdr/herdr.sock' for who in 'abc'},
+        lambda:json.loads(run([ROOT/'dist/hive','inspect','--state-dir',R/'hive','--json']).stdout))
+    result['modern_surface_negotiation_continuous_output_and_replay']=True
     added=run([BIN,'machine','add','hive','--label','Hive'],consumer_env,check=False,timeout=45)
     assert added.returncode==0,added.stderr
     p=pexpect.spawn(BIN,['--remote','hive'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(40,150))
+    rendered=TerminalScreen(p)
     terminals.append(p);p.expect('HOST_');time.sleep(1)
-    p.send("printf '\\110\\111\\126\\105_GATEWAY_OK\\n'\r");p.expect('HIVE_GATEWAY_OK');p.close(force=True)
+    p.send("printf '\\110\\111\\126\\105_GATEWAY_OK\\n'\r");rendered.expect_visible(p,'HIVE_GATEWAY_OK');p.close(force=True)
     # Subsequent direct-sharing tests run without an additional saved gateway.
     entry=next(x for x in json.loads(run([BIN,'machine','list','--json'],consumer_env).stdout) if x['label']=='Hive')
     run([BIN,'machine','remove',entry['id']],consumer_env)
@@ -203,11 +238,12 @@ def main():
     # crop it and are covered by the independent PTY sizing tests above.
     for who in 'abc':
         p=pexpect.spawn(BIN,['--remote','shared-'+who],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(50,170))
+        rendered=TerminalScreen(p)
         terminals.append(p)
         p.expect('HOST_'+who)
         time.sleep(.4)
         p.send("printf '\\110\\111\\126\\105_"+who+"_OK\\n'\r")
-        p.expect('HIVE_'+who+'_OK')
+        rendered.expect_visible(p,'HIVE_'+who+'_OK')
     result['native_bidirectional_three_publishers']=True
     plugin=ROOT/'dist/packages'/('bee-'+('darwin' if sys.platform=='darwin' else 'linux')+'-'+('arm64' if os.uname().machine in ['arm64','aarch64'] else 'amd64'))
     run([BIN,'plugin','link',plugin,'--enabled'],envs['a'])
@@ -256,9 +292,10 @@ def main():
     wait(bee_restarted,20)
     assert api(R/'a/herdr/herdr.sock','session.snapshot')
     p=pexpect.spawn(BIN,['--remote','shared-c'],env=consumer_env,encoding='utf-8',timeout=20,dimensions=(50,170));terminals.append(p)
+    rendered=TerminalScreen(p)
     p.expect('HOST_c');time.sleep(.4)
     p.send("printf '\\125\\120\\107\\122\\101\\104\\105_OK\\n'\r")
-    p.expect('UPGRADE_OK')
+    rendered.expect_visible(p,'UPGRADE_OK')
     result['hive_and_bee_reexec_preserve_local_sessions_and_share_ids']=True
     result['native_terminal_after_executable_upgrade']=True
     # Disable tears down an already-open native connection; local session stays alive.
@@ -273,7 +310,7 @@ def main():
 
 
 if R.exists():
-    raise RuntimeError("Refusing to reuse an existing .r directory")
+    raise RuntimeError("Refusing to reuse an existing native fixture directory")
 
 try:
     main()
@@ -292,5 +329,4 @@ finally:
     for f in logs:f.close()
     result['children_stopped']=all(p.poll() is not None for p in processes)
     print(json.dumps(result,indent=2))
-    # Keep sanitized result, never keys, addresses of real hosts, or terminal recordings.
-    if R.exists():shutil.rmtree(R)
+    TEMP.cleanup()

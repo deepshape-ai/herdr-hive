@@ -1,10 +1,15 @@
 # GitHub Actions releases
 
 Normal branch pushes and pull requests run `.github/workflows/ci.yml`: independent
-macOS/Linux checks for both Go modules, followed by a Linux native Herdr integration
-test. CI downloads the official Herdr 0.9.0 binary and verifies its pinned SHA-256.
+macOS/Linux checks for all three Go modules, followed by Linux native Herdr
+integration against 0.9.0, 0.9.1, 0.9.2 and 0.9.3. Each official binary has a
+pinned SHA-256. Release tags reuse this same matrix. Weekly and manually
+dispatched runs check 0.9.0 plus the latest official stable release, verifying
+GitHub's published asset SHA-256 before execution. Add each newly supported stable
+version and its verified checksum to the release matrix after that check passes.
 All test keys are generated on the runner and removed; no internal infrastructure
-or test credentials are required.
+or test credentials are required. Future compatibility requires generation 1 and
+the frozen required codecs, not merely a version number at or above 0.9.0.
 
 Publish one component by pushing its release tag after its changes are committed:
 
